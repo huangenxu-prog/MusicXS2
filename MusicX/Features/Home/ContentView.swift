@@ -507,7 +507,7 @@ struct ContentView: View {
                     chartTile("飙升榜", subtitle: "近期热度上升", rank: "02", icon: "flame.fill", color: Color(red: 0.61, green: 0.35, blue: 0.91), width: width)
                     chartTile("新歌榜", subtitle: "最新发布的50首", rank: "03", icon: "waveform", color: Color(red: 0.05, green: 0.70, blue: 0.83), width: width)
                 }.padding(.horizontal, 14)
-            }.frame(height: 70)
+            }.frame(height: 116)
         }
     }
 
@@ -908,11 +908,11 @@ struct ContentView: View {
                         songArtwork(song.onlineSong, tint: song.tint, size: 30)
                     }
                 }
-                .frame(width: 30, height: 30)
+                .frame(width: 46, height: 46)
                 .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(song.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
-                    Text(song.artist).font(.system(size: 11)).foregroundStyle(MusicXTheme.muted).lineLimit(1)
+                    Text(song.title).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
+                    Text(song.artist).font(.system(size: 12)).foregroundStyle(MusicXTheme.muted).lineLimit(1)
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 if let duration = song.onlineSong?.duration, duration > 0 {
                     Text(playerTime(duration)).font(.system(size: 10, weight: .medium, design: .rounded)).monospacedDigit().foregroundStyle(MusicXTheme.muted)
@@ -987,7 +987,7 @@ struct ContentView: View {
         let assetName = title == "热歌榜" ? "chart_hot" : title == "飙升榜" ? "chart_rising" : "chart_new"
         return Button { discoveryRoute = .chart(title) } label: {
             ZStack(alignment: .bottomLeading) {
-                HomeArtwork(name: assetName).frame(width: width, height: 70).clipped()
+                HomeArtwork(name: assetName).frame(width: width, height: 116).clipped()
                 LinearGradient(colors: [color.opacity(0.10), .black.opacity(0.72)], startPoint: .top, endPoint: .bottom)
                 VStack(alignment: .leading, spacing: 0) {
                     Image(systemName: icon).font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
@@ -1005,8 +1005,8 @@ struct ContentView: View {
                     .frame(width: 19, height: 19).background(.black.opacity(0.32), in: Circle())
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing).padding(5)
             }
-            .frame(width: width, height: 70)
-            .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+            .frame(width: width, height: 116)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).stroke(.white.opacity(0.34), lineWidth: 0.9))
         }.buttonStyle(.plain)
     }
