@@ -54,6 +54,8 @@ private enum LibraryFilter: String, CaseIterable {
 
 private enum LibraryContentType: String, CaseIterable {
     case songs = "歌曲"
+    case playlists = "歌单"
+    case albums = "专辑"
     case artists = "歌手"
 }
 
@@ -704,7 +706,7 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("音乐库")
                         .font(.system(size: 34, weight: .bold, design: .rounded))
-                    Text("最近听过的音乐与喜欢的歌曲")
+                    Text("属于你的音乐空间")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(MusicXTheme.muted)
                 }
@@ -718,6 +720,26 @@ struct ContentView: View {
                     .contentShape(Circle())
                     .onTapGesture { selectedTab = .search; searchFieldFocused = true }
             }
+
+            HStack(spacing: 8) {
+                libraryQuickCard("我喜欢", detail: "\(favoriteSongs.count) 首", symbol: "heart.fill",
+                                 colors: [Color(red: 0.78, green: 0.20, blue: 0.48), Color(red: 0.34, green: 0.10, blue: 0.30)]) {
+                    libraryContentType = .songs; libraryFilter = .favorites
+                }
+                libraryQuickCard("本地音乐", detail: downloadedSongs.isEmpty ? "未接入" : "\(downloadedSongs.count) 首", symbol: "arrow.down.to.line",
+                                 colors: [Color(red: 0.12, green: 0.48, blue: 0.78), Color(red: 0.08, green: 0.22, blue: 0.48)]) {
+                    libraryContentType = .songs; libraryFilter = .recent
+                }
+                libraryQuickCard("最近播放", detail: "\(recentSongs.count) 首", symbol: "clock.fill",
+                                 colors: [Color(red: 0.48, green: 0.28, blue: 0.80), Color(red: 0.22, green: 0.12, blue: 0.48)]) {
+                    libraryContentType = .songs; libraryFilter = .recent
+                }
+                libraryQuickCard("我的歌单", detail: "0 个", symbol: "list.bullet",
+                                 colors: [Color(red: 0.76, green: 0.34, blue: 0.16), Color(red: 0.38, green: 0.16, blue: 0.12)]) {
+                    libraryContentType = .playlists
+                }
+            }
+            .frame(height: 94)
 
             HStack(spacing: 8) {
                 ForEach(LibraryContentType.allCases, id: \.self) { type in
@@ -734,25 +756,21 @@ struct ContentView: View {
                 }
             }
 
-            HStack(spacing: 10) {
-                Image(systemName: "arrow.up.arrow.down")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(MusicXTheme.muted)
-                ForEach(LibraryFilter.allCases, id: \.self) { filter in
-                    Button { libraryFilter = filter } label: {
-                        Text(filter.rawValue)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(libraryFilter == filter ? .white : MusicXTheme.muted)
-                            .padding(.horizontal, 14).padding(.vertical, 9)
-                            .background(libraryFilter == filter ? MusicXTheme.blue.opacity(0.24) : .white.opacity(0.055), in: Capsule())
-                            .overlay(Capsule().stroke(libraryFilter == filter ? MusicXTheme.blue.opacity(0.48) : .white.opacity(0.08), lineWidth: 0.8))
-                    }
-                    .buttonStyle(.plain)
+            HStack {
+                Button {
+                    if let first = librarySongs.first { select(first) }
+                } label: {
+                    Label("播放全部", systemImage: "play.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(MusicXTheme.background)
+                        .padding(.horizontal, 20).padding(.vertical, 12)
+                        .background(Color.white, in: Capsule())
                 }
+                .buttonStyle(.plain)
+                .disabled(librarySongs.isEmpty || libraryContentType != .songs)
                 Spacer()
-                Text("\(libraryContentType == .songs ? librarySongs.count : libraryArtists.count)")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(MusicXTheme.muted)
+                Text("\(libraryContentType == .songs ? librarySongs.count : libraryContentType == .artists ? libraryArtists.count : 0) 首")
+                    .font(.system(size: 13, weight: .medium)).foregroundStyle(MusicXTheme.muted)
             }
 
             if libraryContentType == .songs {
@@ -771,7 +789,7 @@ struct ContentView: View {
                         .padding(.bottom, 24)
                     }
                 }
-            } else {
+            } else if libraryContentType == .artists {
                 if libraryArtists.isEmpty {
                     Spacer()
                     emptyState(icon: "person.2", title: "暂无歌手", detail: "最近播放或收藏歌曲后，歌手会自动整理在这里")
@@ -803,10 +821,33 @@ struct ContentView: View {
                         .padding(.bottom, 24)
                     }
                 }
+            } else {
+                Spacer()
+                emptyState(icon: libraryContentType == .playlists ? "music.note.list" : "square.stack",
+                           title: libraryContentType == .playlists ? "暂无歌单" : "暂无专辑",
+                           detail: "添加或收藏内容后，会整理显示在这里")
+                Spacer()
             }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 22).padding(.top, 28)
+    }
+
+    private func libraryQuickCard(_ title: String, detail: String, symbol: String, colors: [Color], action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 7) {
+                Image(systemName: symbol).font(.system(size: 21, weight: .semibold)).frame(maxWidth: .infinity)
+                Spacer(minLength: 0)
+                Text(title).font(.system(size: 12, weight: .bold)).lineLimit(1)
+                Text(detail).font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.82)).lineLimit(1)
+            }
+            .foregroundStyle(.white)
+            .padding(9)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .background(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(.white.opacity(0.28), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 
     private func pageHeader(_ title: String, subtitle: String) -> some View {
