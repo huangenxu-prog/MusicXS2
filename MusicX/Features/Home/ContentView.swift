@@ -369,14 +369,16 @@ struct ContentView: View {
     }
 
     private var heroHeader: some View {
-        Image("hero_title")
-            .resizable()
-            .aspectRatio(1536.0 / 564.0, contentMode: .fit)
-            .frame(maxWidth: .infinity)
-            // Extend the banner into the status-bar safe area without moving its bottom edge.
-            .scaleEffect(x: 1, y: 1.10, anchor: .top)
-            .offset(y: -27)
-            .accessibilityLabel("发现音乐，好音乐，总在心里")
+        ZStack(alignment: .topLeading) {
+            LinearGradient(colors: [Color(red: 0.16, green: 0.22, blue: 0.55), Color(red: 0.39, green: 0.20, blue: 0.62), Color(red: 0.82, green: 0.34, blue: 0.48), Color(red: 1.0, green: 0.62, blue: 0.38), MusicXTheme.background], startPoint: .topLeading, endPoint: .bottom)
+            RadialGradient(colors: [Color(red: 1.0, green: 0.62, blue: 0.38).opacity(0.82), .clear], center: .init(x: 0.55, y: 0.78), startRadius: 8, endRadius: 260)
+            VStack(alignment: .leading, spacing: 7) {
+                Text("发现音乐").font(.system(size: 43, weight: .bold, design: .rounded)).foregroundStyle(.white)
+                Text("—  好音乐，总在心里  —").font(.system(size: 16, weight: .medium)).tracking(2).foregroundStyle(.white.opacity(0.92))
+            }.padding(.leading, 22).padding(.top, 68)
+        }
+        .frame(height: 190).frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
     }
 
     private var recommendationSection: some View {
@@ -388,33 +390,26 @@ struct ContentView: View {
                 recommendationTile(title: "每日推荐", subtitle: "为你精选 · 每日更新", icon: "play.fill", colors: [Color(red: 0.16, green: 0.43, blue: 0.72), Color(red: 0.08, green: 0.20, blue: 0.39)], route: .daily, width: width)
                 recommendationTile(title: "精选歌单", subtitle: "用音乐，遇见更好的自己", icon: "music.note.list", colors: [Color(red: 0.43, green: 0.26, blue: 0.63), Color(red: 0.20, green: 0.13, blue: 0.38)], route: .playlists, width: width)
             }.padding(.horizontal, inset)
-        }.frame(height: 70)
+        }.frame(height: 94)
     }
 
     private func recommendationTile(title: String, subtitle: String, icon: String, colors: [Color], route: MusicDiscoveryRoute, width: CGFloat) -> some View {
         let assetName = title == "每日推荐" ? "daily_recommend" : "featured_playlist"
         return Button { discoveryRoute = route } label: {
             ZStack(alignment: .leading) {
-                HomeArtwork(name: assetName).frame(width: width, height: 70).clipped()
-                LinearGradient(colors: [colors.last?.opacity(0.70) ?? .black.opacity(0.65), .clear], startPoint: .leading, endPoint: .trailing)
-                VStack(alignment: .leading, spacing: 0) {
-                    Image(systemName: icon).font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
-                        .frame(width: 21, height: 21).background(.white.opacity(0.20), in: Circle())
-                        .overlay(Circle().stroke(.white.opacity(0.32), lineWidth: 0.8))
+                RoundedRectangle(cornerRadius: 24, style: .continuous).fill(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing))
+                RadialGradient(colors: [colors.first?.opacity(0.72) ?? .white.opacity(0.3), .clear], center: .topLeading, startRadius: 4, endRadius: 170)
+                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                VStack(alignment: .leading, spacing: 5) {
+                    Image(systemName: icon).font(.system(size: 13, weight: .bold)).foregroundStyle(.white).frame(width: 27, height: 27).background(.white.opacity(0.22), in: Circle())
                     Spacer(minLength: 0)
-                    Text(title).font(.system(size: 16, weight: .bold)).foregroundStyle(.white).lineLimit(1)
-                    Text(subtitle).font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.92))
-                        .lineLimit(1).minimumScaleFactor(0.72).padding(.top, 1)
-                }.padding(.leading, 12).padding(.vertical, 4)
-                Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
-                    .frame(width: 24, height: 24).background(.black.opacity(0.24), in: Circle())
-                    .overlay(Circle().stroke(.white.opacity(0.34), lineWidth: 0.8))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing).padding(6)
+                    Text(title).font(.system(size: 17, weight: .bold)).foregroundStyle(.white).lineLimit(1)
+                    Text(subtitle).font(.system(size: 12, weight: .medium)).foregroundStyle(.white.opacity(0.92)).lineLimit(1).minimumScaleFactor(0.8)
+                }.padding(.leading, 16).padding(.vertical, 12)
             }
-            .frame(width: width, height: 70)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(.white.opacity(0.46), lineWidth: 1))
-            .shadow(color: colors.first?.opacity(0.28) ?? .clear, radius: 10, y: 3)
+            .frame(width: width, height: 84)
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(.white.opacity(0.34), lineWidth: 1))
         }.buttonStyle(.plain)
     }
 
@@ -955,10 +950,11 @@ struct ContentView: View {
                 LinearGradient(colors: [color.opacity(0.10), .black.opacity(0.72)], startPoint: .top, endPoint: .bottom)
                 VStack(alignment: .leading, spacing: 0) {
                     Image(systemName: icon).font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
-                    Text(rank).font(.system(size: 18, weight: .heavy, design: .rounded)).foregroundStyle(.white)
-                    Text(title).font(.system(size: 12, weight: .bold)).foregroundStyle(.white).lineLimit(1)
-                    Text(subtitle).font(.system(size: 8, weight: .medium)).foregroundStyle(.white.opacity(0.9)).lineLimit(1).minimumScaleFactor(0.7)
-                }.padding(.leading, 8).padding(.bottom, 6)
+                    Text(rank).font(.system(size: 26, weight: .heavy, design: .rounded)).foregroundStyle(.white)
+                    Spacer(minLength: 4)
+                    Text(title).font(.system(size: 15, weight: .bold)).foregroundStyle(.white).lineLimit(1)
+                    Text(subtitle).font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.9)).lineLimit(1).minimumScaleFactor(0.7)
+                }.padding(.leading, 13).padding(.vertical, 12)
                 HStack(spacing: 1) {
                     ForEach(0..<7, id: \.self) { index in
                         Capsule().fill(color.opacity(0.95)).frame(width: 2, height: CGFloat([4, 7, 10, 6, 12, 8, 5][index]))
