@@ -201,11 +201,12 @@ struct MusicDiscoveryPage: View {
     // These names map to the six imported high-resolution catalog image sets.
     private func categoryArtworkName(for name: String) -> String {
         switch name {
-        case "华语流行": "category_chinese_pop"
-        case "经典老歌": "category_classic"
-        case "轻音乐": "category_light"
-        case "纯音乐": "category_instrumental"
-        case "摇滚": "category_rock"
+        case "华语流行", "华语流行精选": "category_chinese_pop"
+        case "经典老歌", "经典金曲精选": "category_classic"
+        case "轻音乐", "影视原声精选": "category_light"
+        case "纯音乐", "独立音乐精选": "category_instrumental"
+        case "摇滚", "通勤驾驶精选": "category_rock"
+        case "本周编辑精选": "category_singers"
         default: "category_singers"
         }
     }
@@ -349,38 +350,40 @@ struct MusicDiscoveryPage: View {
     }
 
     private var playlistGrid: some View {
-        let items: [(String, String, [Color], String)] = [
-            ("华语流行", "热门华语歌曲", [Color(red: 0.20, green: 0.42, blue: 0.68), Color(red: 0.10, green: 0.16, blue: 0.30)], "category_chinese_pop"),
-            ("轻音乐", "放松与专注", [Color(red: 0.40, green: 0.25, blue: 0.49), Color(red: 0.17, green: 0.14, blue: 0.30)], "category_light"),
-            ("经典老歌", "熟悉的旋律", [Color(red: 0.48, green: 0.28, blue: 0.25), Color(red: 0.20, green: 0.14, blue: 0.17)], "category_classic"),
-            ("纯音乐", "安静聆听", [Color(red: 0.16, green: 0.39, blue: 0.38), Color(red: 0.08, green: 0.20, blue: 0.23)], "category_instrumental"),
-            ("摇滚", "节奏与力量", [Color(red: 0.43, green: 0.22, blue: 0.27), Color(red: 0.19, green: 0.13, blue: 0.22)], "category_rock"),
-            ("周杰伦", "歌手精选", [Color(red: 0.27, green: 0.32, blue: 0.53), Color(red: 0.15, green: 0.17, blue: 0.30)], "category_singers")
+        let items: [(String, String, String)] = [
+            ("本周编辑精选", "本周精选", "category_singers"),
+            ("华语流行精选", "宝藏好歌 · 优质华语流行歌曲合集", "category_chinese_pop"),
+            ("经典金曲精选", "经久不衰的动人歌声", "category_classic"),
+            ("独立音乐精选", "Indie Music | 独立音乐聚落", "category_instrumental"),
+            ("影视原声精选", "问心系列 · 影视原声带", "category_light"),
+            ("通勤驾驶精选", "通勤路上 · 有前行感的节奏", "category_rock")
         ]
-        return LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
+        return LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 18) {
             ForEach(items, id: \.0) { item in
                 Button { onOpenPlaylist(item.0) } label: {
-                    GeometryReader { geometry in
-                        ZStack(alignment: .bottomLeading) {
-                            Image(item.3)
+                    VStack(alignment: .leading, spacing: 7) {
+                        ZStack(alignment: .bottomTrailing) {
+                            Image(item.2)
                                 .resizable()
                                 .scaledToFill()
-                                .frame(width: geometry.size.width, height: geometry.size.height)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 126)
                                 .clipped()
-                            LinearGradient(colors: [.clear, .black.opacity(0.76)], startPoint: .center, endPoint: .bottom)
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(item.0).font(.system(size: 17, weight: .bold))
-                                Text(item.1).font(.system(size: 12, weight: .medium)).foregroundStyle(.white.opacity(0.82))
-                            }
-                            .foregroundStyle(.white)
-                            .padding(14)
+                                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 36, height: 36)
+                                .background(.black.opacity(0.42), in: Circle())
+                                .overlay(Circle().stroke(.white.opacity(0.38), lineWidth: 1))
+                                .padding(10)
                         }
-                        .frame(width: geometry.size.width, height: geometry.size.height)
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(.white.opacity(0.14), lineWidth: 1))
+                        Text(item.0).font(.system(size: 16, weight: .bold)).foregroundStyle(.white).lineLimit(1)
+                        Text(item.1).font(.system(size: 12, weight: .medium)).foregroundStyle(MusicXTheme.muted).lineLimit(2)
                     }
-                    .frame(height: 148)
-                }.buttonStyle(.plain)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
             }
         }
     }
