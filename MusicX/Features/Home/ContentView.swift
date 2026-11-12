@@ -371,47 +371,60 @@ struct ContentView: View {
     }
 
     private var heroHeader: some View {
-        ZStack(alignment: .topLeading) {
-            LinearGradient(colors: [Color(red: 0.16, green: 0.22, blue: 0.55), Color(red: 0.39, green: 0.20, blue: 0.62), Color(red: 0.82, green: 0.34, blue: 0.48), Color(red: 1.0, green: 0.62, blue: 0.38), MusicXTheme.background], startPoint: .topLeading, endPoint: .bottom)
-            RadialGradient(colors: [Color(red: 1.0, green: 0.62, blue: 0.38).opacity(0.82), .clear], center: .init(x: 0.55, y: 0.78), startRadius: 8, endRadius: 260)
-            VStack(alignment: .leading, spacing: 7) {
-                Text("发现音乐").font(.system(size: 43, weight: .bold, design: .rounded)).foregroundStyle(.white)
-                Text("—  好音乐，总在心里  —").font(.system(size: 16, weight: .medium)).tracking(2).foregroundStyle(.white.opacity(0.92))
-            }.padding(.leading, 22).padding(.top, 68)
+        GeometryReader { proxy in
+            ZStack(alignment: .topLeading) {
+                LinearGradient(stops: [
+                    .init(color: Color(red: 0.10, green: 0.16, blue: 0.39), location: 0),
+                    .init(color: Color(red: 0.30, green: 0.19, blue: 0.55), location: 0.40),
+                    .init(color: Color(red: 0.66, green: 0.29, blue: 0.53), location: 0.64),
+                    .init(color: Color(red: 1.00, green: 0.57, blue: 0.39), location: 0.80),
+                    .init(color: MusicXTheme.background, location: 1)
+                ], startPoint: .top, endPoint: .bottom)
+                RadialGradient(colors: [Color(red: 1.0, green: 0.62, blue: 0.43).opacity(0.92), .clear],
+                               center: .init(x: 0.52, y: 0.80), startRadius: 2, endRadius: proxy.size.width * 0.78)
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("发现音乐").font(.system(size: 43, weight: .regular)).foregroundStyle(.white)
+                    Text("— 好音乐，总在心里 —").font(.system(size: 16)).tracking(2).foregroundStyle(.white.opacity(0.94))
+                }
+                .padding(.leading, 20).padding(.top, 66)
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height)
         }
-        .frame(height: 190).frame(maxWidth: .infinity)
+        .frame(height: 198).frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
     }
 
     private var recommendationSection: some View {
         GeometryReader { proxy in
-            let inset: CGFloat = 14
-            let gap: CGFloat = 10
+            let inset: CGFloat = 16
+            let gap: CGFloat = 13
             let width = max(0, (proxy.size.width - inset * 2 - gap) / 2)
             HStack(spacing: gap) {
-                recommendationTile(title: "每日推荐", subtitle: "为你精选 · 每日更新", icon: "play.fill", colors: [Color(red: 0.16, green: 0.43, blue: 0.72), Color(red: 0.08, green: 0.20, blue: 0.39)], route: .daily, width: width)
-                recommendationTile(title: "精选歌单", subtitle: "用音乐，遇见更好的自己", icon: "music.note.list", colors: [Color(red: 0.43, green: 0.26, blue: 0.63), Color(red: 0.20, green: 0.13, blue: 0.38)], route: .playlists, width: width)
+                recommendationTile(title: "每日推荐", subtitle: "每日更新", icon: "play.fill",
+                    colors: [Color(red: 0.98, green: 0.62, blue: 0.34), Color(red: 0.55, green: 0.25, blue: 0.48)], route: .daily, width: width)
+                recommendationTile(title: "精选歌单", subtitle: "遇见更好的自己", icon: "text.alignleft",
+                    colors: [Color(red: 0.55, green: 0.39, blue: 0.91), Color(red: 0.22, green: 0.13, blue: 0.56)], route: .playlists, width: width)
             }.padding(.horizontal, inset)
-        }.frame(height: 94)
+        }.frame(height: 112)
     }
 
     private func recommendationTile(title: String, subtitle: String, icon: String, colors: [Color], route: MusicDiscoveryRoute, width: CGFloat) -> some View {
-        let assetName = title == "每日推荐" ? "daily_recommend" : "featured_playlist"
-        return Button { discoveryRoute = route } label: {
+        Button { discoveryRoute = route } label: {
             ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 24, style: .continuous).fill(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing))
-                RadialGradient(colors: [colors.first?.opacity(0.72) ?? .white.opacity(0.3), .clear], center: .topLeading, startRadius: 4, endRadius: 170)
-                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                VStack(alignment: .leading, spacing: 5) {
-                    Image(systemName: icon).font(.system(size: 13, weight: .bold)).foregroundStyle(.white).frame(width: 27, height: 27).background(.white.opacity(0.22), in: Circle())
+                RoundedRectangle(cornerRadius: 23, style: .continuous).fill(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing))
+                RadialGradient(colors: [.white.opacity(0.24), .clear], center: .topLeading, startRadius: 3, endRadius: 180)
+                    .clipShape(RoundedRectangle(cornerRadius: 23, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Image(systemName: icon).font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
+                        .frame(width: 25, height: 25).background(.white.opacity(0.25), in: Circle())
                     Spacer(minLength: 0)
-                    Text(title).font(.system(size: 17, weight: .bold)).foregroundStyle(.white).lineLimit(1)
-                    Text(subtitle).font(.system(size: 12, weight: .medium)).foregroundStyle(.white.opacity(0.92)).lineLimit(1).minimumScaleFactor(0.8)
-                }.padding(.leading, 16).padding(.vertical, 12)
+                    Text(title).font(.system(size: 18, weight: .bold)).foregroundStyle(.white)
+                    Text(subtitle).font(.system(size: 14)).foregroundStyle(.white.opacity(0.92))
+                }.padding(.leading, 14).padding(.vertical, 10)
             }
-            .frame(width: width, height: 84)
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(.white.opacity(0.34), lineWidth: 1))
+            .frame(width: width, height: 86)
+            .clipShape(RoundedRectangle(cornerRadius: 23, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 23, style: .continuous).stroke(.white.opacity(0.28), lineWidth: 1))
         }.buttonStyle(.plain)
     }
 
@@ -496,16 +509,16 @@ struct ContentView: View {
     }
 
     private var chartSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            homeSectionTitle("排行榜", action: nil).padding(.horizontal, 14)
+        VStack(alignment: .leading, spacing: 13) {
+            homeSectionTitle("排行榜", action: nil).padding(.horizontal, 16)
             GeometryReader { proxy in
-                let width = max(0, (proxy.size.width - 44) / 3)
-                HStack(spacing: 8) {
-                    chartTile("热歌榜", subtitle: "当下最热的50首", rank: "01", icon: "crown.fill", color: Color(red: 0.95, green: 0.47, blue: 0.38), width: width)
-                    chartTile("飙升榜", subtitle: "近期热度上升", rank: "02", icon: "flame.fill", color: Color(red: 0.61, green: 0.35, blue: 0.91), width: width)
-                    chartTile("新歌榜", subtitle: "最新发布的50首", rank: "03", icon: "waveform", color: Color(red: 0.05, green: 0.70, blue: 0.83), width: width)
-                }.padding(.horizontal, 14)
-            }.frame(height: 116)
+                let width = max(0, (proxy.size.width - 52) / 3)
+                HStack(spacing: 10) {
+                    chartTile("热歌榜", subtitle: "Top 50", rank: "01", color: Color(red: 0.83, green: 0.37, blue: 0.25), width: width)
+                    chartTile("飙升榜", subtitle: "热度上升", rank: "02", color: Color(red: 0.49, green: 0.30, blue: 0.88), width: width)
+                    chartTile("新歌榜", subtitle: "最新 50 首", rank: "03", color: Color(red: 0.08, green: 0.55, blue: 0.72), width: width)
+                }.padding(.horizontal, 16)
+            }.frame(height: 107)
         }
     }
 
@@ -886,25 +899,21 @@ struct ContentView: View {
 
     private func homeSongRow(_ song: AppSong, artworkName: String? = nil) -> some View {
         Button { select(song) } label: {
-            HStack(spacing: 9) {
+            HStack(spacing: 12) {
                 Group {
-                    if let artworkName {
-                        HomeArtwork(name: artworkName)
-                    } else {
-                        songArtwork(song.onlineSong, tint: song.tint, size: 30)
-                    }
+                    if let artworkName { HomeArtwork(name: artworkName) }
+                    else { songArtwork(song.onlineSong, tint: song.tint, size: 46) }
                 }
                 .frame(width: 46, height: 46)
-                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                VStack(alignment: .leading, spacing: 1) {
+                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                VStack(alignment: .leading, spacing: 4) {
                     Text(song.title).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
                     Text(song.artist).font(.system(size: 12)).foregroundStyle(MusicXTheme.muted).lineLimit(1)
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 if let duration = song.onlineSong?.duration, duration > 0 {
-                    Text(playerTime(duration)).font(.system(size: 10, weight: .medium, design: .rounded)).monospacedDigit().foregroundStyle(MusicXTheme.muted)
+                    Text(playerTime(duration)).font(.system(size: 12, weight: .regular, design: .rounded)).monospacedDigit().foregroundStyle(MusicXTheme.muted)
                 }
-                Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(.white.opacity(0.58))
-            }.contentShape(Rectangle()).padding(.vertical, 0)
+            }.contentShape(Rectangle()).padding(.vertical, 7)
         }.buttonStyle(.plain)
     }
 
@@ -969,31 +978,23 @@ struct ContentView: View {
         }.buttonStyle(.plain)
     }
 
-    private func chartTile(_ title: String, subtitle: String, rank: String, icon: String, color: Color, width: CGFloat) -> some View {
-        let assetName = title == "热歌榜" ? "chart_hot" : title == "飙升榜" ? "chart_rising" : "chart_new"
-        return Button { discoveryRoute = .chart(title) } label: {
-            ZStack(alignment: .bottomLeading) {
-                HomeArtwork(name: assetName).frame(width: width, height: 116).clipped()
-                LinearGradient(colors: [color.opacity(0.10), .black.opacity(0.72)], startPoint: .top, endPoint: .bottom)
+    private func chartTile(_ title: String, subtitle: String, rank: String, color: Color, width: CGFloat) -> some View {
+        Button { discoveryRoute = .chart(title) } label: {
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(LinearGradient(colors: [color.opacity(0.90), Color(red: 0.10, green: 0.11, blue: 0.23)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                RadialGradient(colors: [color.opacity(0.88), .clear], center: .init(x: 0.72, y: 0.25), startRadius: 2, endRadius: 100)
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                 VStack(alignment: .leading, spacing: 0) {
-                    Image(systemName: icon).font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
-                    Text(rank).font(.system(size: 26, weight: .heavy, design: .rounded)).foregroundStyle(.white)
-                    Spacer(minLength: 4)
-                    Text(title).font(.system(size: 15, weight: .bold)).foregroundStyle(.white).lineLimit(1)
-                    Text(subtitle).font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.9)).lineLimit(1).minimumScaleFactor(0.7)
+                    Text(rank).font(.system(size: 27, weight: .regular)).foregroundStyle(.white)
+                    Spacer(minLength: 0)
+                    Text(title).font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
+                    Text(subtitle).font(.system(size: 12)).foregroundStyle(.white.opacity(0.88)).padding(.top, 4)
                 }.padding(.leading, 13).padding(.vertical, 12)
-                HStack(spacing: 1) {
-                    ForEach(0..<7, id: \.self) { index in
-                        Capsule().fill(color.opacity(0.95)).frame(width: 2, height: CGFloat([4, 7, 10, 6, 12, 8, 5][index]))
-                    }
-                }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing).padding(.trailing, 28).padding(.bottom, 7)
-                Image(systemName: "chevron.right").font(.system(size: 8, weight: .bold)).foregroundStyle(.white)
-                    .frame(width: 19, height: 19).background(.black.opacity(0.32), in: Circle())
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing).padding(5)
             }
-            .frame(width: width, height: 116)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous).stroke(.white.opacity(0.34), lineWidth: 0.9))
+            .frame(width: width, height: 107)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(.white.opacity(0.26), lineWidth: 1))
         }.buttonStyle(.plain)
     }
 
