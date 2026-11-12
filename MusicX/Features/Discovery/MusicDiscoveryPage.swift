@@ -152,19 +152,39 @@ struct MusicDiscoveryPage: View {
 
     private var playlistIntro: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("按心情聆听").font(.system(size: 28, weight: .bold))
-            Text("从在线曲库中发现适合此刻的音乐").font(.system(size: 13)).foregroundStyle(MusicXTheme.muted)
+            HStack(spacing: 10) {
+                Capsule().fill(MusicXTheme.blue).frame(width: 4, height: 25)
+                Text("编辑精选").font(.system(size: 28, weight: .bold))
+            }
+            Text("从不同风格与场景中，发现值得收藏的歌单")
+                .font(.system(size: 14)).foregroundStyle(MusicXTheme.muted)
         }
     }
 
     private var chartIntro: some View {
         ZStack(alignment: .bottomLeading) {
             Image(chartArtworkName).resizable().scaledToFill()
-            LinearGradient(colors: [.black.opacity(0.02), .black.opacity(0.70)], startPoint: .top, endPoint: .bottom)
-            VStack(alignment: .leading, spacing: 7) {
-                Text("排行榜").font(.system(size: 29, weight: .bold, design: .rounded))
-                Text("MusicX 精选榜单 · 持续更新").font(.system(size: 13, weight: .medium)).foregroundStyle(.white.opacity(0.78))
-            }.padding(22)
+            LinearGradient(colors: [.clear, .black.opacity(0.72)], startPoint: .top, endPoint: .bottom)
+            HStack(alignment: .bottom, spacing: 12) {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(selectedChart).font(.system(size: 28, weight: .bold, design: .rounded))
+                    Text("当下最热门的 50 首 · 每日更新")
+                        .font(.system(size: 13, weight: .medium)).foregroundStyle(.white.opacity(0.88))
+                }
+                Spacer(minLength: 4)
+                Button {
+                    onQueueChanged(songs)
+                    if let first = songs.first { onPlay(first) }
+                } label: {
+                    Label("播放全部", systemImage: "play.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(MusicXTheme.background)
+                        .padding(.horizontal, 18).padding(.vertical, 14)
+                        .background(Color.white, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(songs.isEmpty)
+            }.padding(20)
         }
         .frame(height: 194).clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(.white.opacity(0.13), lineWidth: 1))
@@ -213,14 +233,45 @@ struct MusicDiscoveryPage: View {
     }
 
     private func albumBanner(title: String, artist: String) -> some View {
-        HStack(spacing: 18) {
-            artwork(title: title, subtitle: artist, colors: [Color(red: 0.20, green: 0.42, blue: 0.68), Color(red: 0.10, green: 0.16, blue: 0.30)], height: 176).frame(width: 176)
-            VStack(alignment: .leading, spacing: 8) {
-                Text(title).font(.system(size: 22, weight: .bold))
-                Text(artist).font(.system(size: 14)).foregroundStyle(MusicXTheme.muted)
-                Text("专辑曲目").font(.system(size: 12)).foregroundStyle(MusicXTheme.muted)
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 18) {
+                artwork(title: title, subtitle: artist, colors: [Color(red: 0.20, green: 0.42, blue: 0.68), Color(red: 0.10, green: 0.16, blue: 0.30)], height: 148)
+                    .frame(width: 148, height: 148)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(title).font(.system(size: 29, weight: .bold))
+                    Text(artist).font(.system(size: 16, weight: .medium)).foregroundStyle(MusicXTheme.blue)
+                    Text("专辑 · 共 \(songs.count) 首").font(.system(size: 13)).foregroundStyle(MusicXTheme.muted)
+                }
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+            HStack(spacing: 10) {
+                Button {
+                    onQueueChanged(songs)
+                    if let first = songs.first { onPlay(first) }
+                } label: {
+                    Label("播放全部", systemImage: "play.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(MusicXTheme.background)
+                        .frame(maxWidth: .infinity).frame(height: 52)
+                        .background(Color.white, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(songs.isEmpty)
+                Button {
+                    let shuffled = songs.shuffled()
+                    onQueueChanged(shuffled)
+                    if let first = shuffled.first { onPlay(first) }
+                } label: {
+                    Label("随机播放", systemImage: "shuffle")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity).frame(height: 52)
+                        .background(Color.white.opacity(0.025), in: Capsule())
+                        .overlay(Capsule().stroke(MusicXTheme.blue.opacity(0.55), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .disabled(songs.isEmpty)
+            }
         }
     }
 
@@ -237,7 +288,10 @@ struct MusicDiscoveryPage: View {
 
     private var playAllBar: some View {
         HStack {
-            Button { if let first = songs.first { onPlay(first) } } label: {
+            Button {
+                onQueueChanged(songs)
+                if let first = songs.first { onPlay(first) }
+            } label: {
                 Label("播放全部", systemImage: "play.fill")
                     .font(.system(size: 14, weight: .semibold)).padding(.horizontal, 20).padding(.vertical, 13)
                     .background(LinearGradient(colors: [MusicXTheme.blue, Color(red: 0.20, green: 0.43, blue: 0.84)], startPoint: .topLeading, endPoint: .bottomTrailing), in: Capsule())
