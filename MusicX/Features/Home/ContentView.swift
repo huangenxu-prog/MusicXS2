@@ -1524,7 +1524,7 @@ struct ContentView: View {
                 if playbackRequestID == requestID { isResolvingSong = false }
             }
             do {
-                let resolver = MusicSourceScheduler()
+                let resolver = LXMusicURLResolver()
                 let url = try await resolver.resolveFresh(song: onlineSong, quality: selectedMusicQuality)
                 try Task.checkCancellation()
                 guard playbackRequestID == requestID else { return }
@@ -1688,7 +1688,7 @@ struct ContentView: View {
                     if playbackRequestID == requestID { isResolvingSong = false }
                 }
                 do {
-                    let url = try await MusicSourceScheduler().resolve(song: onlineSong, quality: selectedMusicQuality)
+                    let url = try await LXMusicURLResolver().resolve(song: onlineSong, quality: selectedMusicQuality)
                     try Task.checkCancellation()
                     guard playbackRequestID == requestID else { return }
                     currentSong = song
@@ -1726,7 +1726,8 @@ struct ContentView: View {
         let service = GDStudioMusicSearchService()
         async let netease = try? service.search(keyword: keyword, source: .netease, count: 50)
         async let qq = try? service.search(keyword: keyword, source: .qq, count: 50)
-        let sourceResults = [await netease ?? [], await qq ?? []]
+        async let kuwo = try? service.search(keyword: keyword, source: .kuwo, count: 50)
+        let sourceResults = [await netease ?? [], await qq ?? [], await kuwo ?? []]
         // Interleave only providers with an implemented playback resolver.
         var merged: [MusicSong] = []
         let maxCount = sourceResults.map(\.count).max() ?? 0
@@ -1845,7 +1846,7 @@ struct ContentView: View {
         isDownloading = true
         Task {
             do {
-                let sourceURL = try await MusicSourceScheduler().resolve(song: song, quality: selectedMusicQuality)
+                let sourceURL = try await LXMusicURLResolver().resolve(song: song, quality: selectedMusicQuality)
                 let (temporaryURL, response) = try await URLSession.shared.download(from: sourceURL)
                 if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
                     throw URLError(.badServerResponse)
