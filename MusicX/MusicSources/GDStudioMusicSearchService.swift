@@ -62,7 +62,7 @@ struct GDStudioMusicSearchService {
                 artist: artist,
                 album: album,
                 artworkURL: nil,
-                duration: nil,
+                duration: parseDuration(row["interval"] ?? row["duration"] ?? row["time"]),
                 hash: row["hash"] as? String,
                 albumID: row["album_id"].map { String(describing: $0) },
                 pictureID: row["pic_id"].map { String(describing: $0) },
@@ -76,6 +76,25 @@ struct GDStudioMusicSearchService {
     }
 
     
+    private func parseDuration(_ value: Any?) -> TimeInterval? {
+        guard let value, !(value is NSNull) else { return nil }
+        if let number = value as? NSNumber {
+            let raw = number.doubleValue
+            guard raw > 0 else { return nil }
+            return raw > 10_000 ? raw / 1_000 : raw
+        }
+        guard let string = value as? String else { return nil }
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if trimmed.contains(":") {
+            let parts = trimmed.split(separator: ":").compactMap { Double($0) }
+            guard !parts.isEmpty else { return nil }
+            return parts.reduce(0) { $0 * 60 + $1 }
+        }
+        guard let raw = Double(trimmed), raw > 0 else { return nil }
+        return raw > 10_000 ? raw / 1_000 : raw
+    }
+
     /// Searches for a real NetEase playlist, then loads its tracks by playlist ID.
     func playlistTracks(keyword: String, count: Int = 50) async throws -> [MusicSong] {
         var searchComponents = URLComponents(string: "https://music.163.com/api/search/get/web")
