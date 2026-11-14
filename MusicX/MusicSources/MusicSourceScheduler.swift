@@ -160,7 +160,7 @@ struct MusicSourceScheduler: MusicURLResolving {
         }
 
         let path = "/api/song/enhance/player/url/v1"
-        let payload = "{\"ids\":\"[\(song.sourceID)]\",\"level\":\"\(song.neteaseLevel)\",\"encodeType\":\"flac\"}"
+        let payload = "{\"ids\":\"[\(song.sourceID)]\",\"level\":\"\(quality.neteaseLevel)\",\"encodeType\":\"flac\"}"
         let encrypted = try eapiParameters(path: path, payload: payload)
         guard let url = URL(string: "https://interface3.music.163.com\(path)") else {
             throw MusicSourceError.invalidResponse("网易云官方接口地址无效")
@@ -427,13 +427,3 @@ enum MusicSongMatcher {
     }
 }
 
-private extension MusicSong {
-    var neteaseLevel: String {
-        switch selfQualityPlaceholder {
-        case "": return "exhigh"
-        default: return "exhigh"
-        }
-    }
-
-    var selfQualityPlaceholder: String { "" }
-}
