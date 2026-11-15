@@ -654,21 +654,22 @@ struct ContentView: View {
         defer { isLoadingOfficialCollections = false }
 
         do {
-            let results = try await MusicCatalogSearchEngine().featuredPlaylists(count: 24)
+            // Fetch every collection returned by both recommendation endpoints.
+            // Each provider keeps its own playlist ID; no cross-platform merging.
+            let collections = try await PlatformCollectionCatalog().remainingRecommendedCollections()
             guard !Task.isCancelled else { return }
-
-            // Only retain platform-fed collections; keyword search results are not
-            // promoted to "official" home content.
-            let platformCollections = results.filter { collection in
-                guard let provenance = collection.provenance else { return false }
-                return provenance == .officialEditorial
-                    || provenance == .platformRecommended
-                    || provenance == .categoryFeatured
+            homeOfficialCollections = collections.map { item in
+                MusicPlaylist(
+                    source: item.provider == .qq ? .qq : .netease,
+                    sourceID: item.sourceID,
+                    name: item.name,
+                    creator: nil,
+                    description: nil,
+                    artworkURL: item.artworkURL,
+                    trackCount: nil,
+                    provenance: .platformRecommended
+                )
             }
-            var seen = Set<String>()
-            homeOfficialCollections = Array(
-                platformCollections.filter { seen.insert($0.id).inserted }.prefix(24)
-            )
             if homeOfficialCollections.isEmpty {
                 officialCollectionsError = "暂时没有可展示的推荐歌单"
             }
