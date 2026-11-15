@@ -402,8 +402,8 @@ struct ContentView: View {
             HStack(spacing: gap) {
                 recommendationTile(title: "每日推荐", subtitle: "每日更新", icon: "play.fill",
                     colors: [Color(red: 0.98, green: 0.62, blue: 0.34), Color(red: 0.55, green: 0.25, blue: 0.48)], route: .daily, width: width)
-                recommendationTile(title: "精选歌单", subtitle: "遇见更好的自己", icon: "text.alignleft",
-                    colors: [Color(red: 0.55, green: 0.39, blue: 0.91), Color(red: 0.22, green: 0.13, blue: 0.56)], route: .playlists, width: width)
+                recommendationTile(title: "精选歌曲", subtitle: "遇见更好的自己", icon: "text.alignleft",
+                    colors: [Color(red: 0.55, green: 0.39, blue: 0.91), Color(red: 0.22, green: 0.13, blue: 0.56)], route: .featuredSongs, width: width)
             }.padding(.horizontal, inset)
         }.frame(height: 112)
     }
