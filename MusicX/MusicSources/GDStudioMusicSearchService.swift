@@ -332,6 +332,106 @@ struct GDStudioMusicSearchService {
         return Array(playlists.prefix(count))
     }
 
+
+    /// LX mobile-compatible Kugou catalog search. This only fetches song metadata;
+    /// the selected custom LX source remains responsible for resolving playback.
+    func searchKugouNative(keyword: String, count: Int = 20) async throws -> [MusicSong] {
+        var components = URLComponents(string: "https://songsearch.kugou.com/song_search_v2")!
+        components.queryItems = [
+            URLQueryItem(name: "keyword", value: keyword),
+            URLQueryItem(name: "page", value: "1"),
+            URLQueryItem(name: "pagesize", value: String(count)),
+            URLQueryItem(name: "userid", value: "0"),
+            URLQueryItem(name: "clientver", value: ""),
+            URLQueryItem(name: "platform", value: "WebFilter"),
+            URLQueryItem(name: "filter", value: "2"),
+            URLQueryItem(name: "iscorrection", value: "1"),
+            URLQueryItem(name: "privilege_filter", value: "0"),
+            URLQueryItem(name: "area_code", value: "1")
+        ]
+        var request = URLRequest(url: components.url!)
+        request.timeoutInterval = 12
+        request.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw MusicSourceError.invalidResponse("酷狗原生搜索 HTTP \\((response as? HTTPURLResponse)?.statusCode ?? -1)")
+        }
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              (root["error_code"] as? Int) == 0,
+              let payload = root["data"] as? [String: Any],
+              let rows = payload["lists"] as? [[String: Any]] else {
+            throw MusicSourceError.invalidResponse("酷狗原生搜索响应格式异常")
+        }
+        return rows.compactMap { row -> MusicSong? in
+            let id = (row["Audioid"] as? NSNumber)?.stringValue
+                ?? (row["Audioid"] as? String)
+            guard let id, !id.isEmpty else { return nil }
+            let singers = (row["Singers"] as? [[String: Any]])?
+                .compactMap { $0["name"] as? String }.joined(separator: " / ")
+            let duration = (row["Duration"] as? NSNumber)?.doubleValue
+            return MusicSong(
+                source: .kugou, sourceID: id,
+                title: (row["OriSongName"] as? String) ?? (row["SongName"] as? String) ?? "",
+                artist: singers?.isEmpty == false ? singers! : (row["SingerName"] as? String ?? ""),
+                album: row["AlbumName"] as? String, artworkURL: nil,
+                duration: duration, hash: row["FileHash"] as? String,
+                albumID: row["AlbumID"].map { String(describing: $0) },
+                pictureID: nil, lyricID: nil
+            )
+        }
+    }
+
+    /// LX mobile-compatible Kuwo catalog search; preserve MUSICRID for JS lookup.
+    func searchKuwoNative(keyword: String, count: Int = 20) async throws -> [MusicSong] {
+        var components = URLComponents(string: "https://search.kuwo.cn/r.s")!
+        components.queryItems = [
+            URLQueryItem(name: "client", value: "kt"),
+            URLQueryItem(name: "all", value: keyword),
+            URLQueryItem(name: "pn", value: "0"),
+            URLQueryItem(name: "rn", value: String(count)),
+            URLQueryItem(name: "uid", value: "794762570"),
+            URLQueryItem(name: "ver", value: "kwplayer_ar_9.2.2.1"),
+            URLQueryItem(name: "vipver", value: "1"),
+            URLQueryItem(name: "show_copyright_off", value: "1"),
+            URLQueryItem(name: "newver", value: "1"),
+            URLQueryItem(name: "ft", value: "music"),
+            URLQueryItem(name: "cluster", value: "0"),
+            URLQueryItem(name: "strategy", value: "2012"),
+            URLQueryItem(name: "encoding", value: "utf8"),
+            URLQueryItem(name: "rformat", value: "json"),
+            URLQueryItem(name: "vermerge", value: "1"),
+            URLQueryItem(name: "mobi", value: "1"),
+            URLQueryItem(name: "issubtitle", value: "1")
+        ]
+        var request = URLRequest(url: components.url!)
+        request.timeoutInterval = 12
+        request.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw MusicSourceError.invalidResponse("酷我原生搜索 HTTP \\((response as? HTTPURLResponse)?.statusCode ?? -1)")
+        }
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let rows = root["abslist"] as? [[String: Any]] else {
+            throw MusicSourceError.invalidResponse("酷我原生搜索响应格式异常")
+        }
+        return rows.compactMap { row -> MusicSong? in
+            guard let rawID = row["MUSICRID"] as? String else { return nil }
+            let id = rawID.replacingOccurrences(of: "MUSIC_", with: "")
+            guard !id.isEmpty else { return nil }
+            let duration = (row["DURATION"] as? String).flatMap(Double.init)
+                ?? (row["DURATION"] as? NSNumber)?.doubleValue
+            return MusicSong(
+                source: .kuwo, sourceID: id,
+                title: row["SONGNAME"] as? String ?? "",
+                artist: row["ARTIST"] as? String ?? "",
+                album: row["ALBUM"] as? String, artworkURL: nil,
+                duration: duration, hash: nil,
+                albumID: row["ALBUMID"].map { String(describing: $0) },
+                pictureID: nil, lyricID: nil
+            )
+        }
+    }
+
     /// Native QQ song search for LX diagnostics; independent of the GDStudio proxy.
     func searchQQSongsNative(keyword: String, count: Int = 20) async throws -> [MusicSong] {
         let query = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
