@@ -19,10 +19,24 @@ struct LXSourceTestPanel: View {
                     }
                     ForEach(importedIDs, id: \.self) { id in
                         HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(id).font(.caption).lineLimit(1)
-                                Text("已保存 · 未接入正式播放").font(.caption2).foregroundStyle(.secondary)
+                            Button {
+                                do {
+                                    try getLibrary().select(id: id)
+                                    selectedID = id
+                                    message = "已切换测试音源。尚未接入正式播放。"
+                                } catch { message = error.localizedDescription }
+                            } label: {
+                                HStack {
+                                    Image(systemName: selectedID == id ? "largecircle.fill.circle" : "circle")
+                                        .foregroundStyle(selectedID == id ? .green : .secondary)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text((try? getLibrary().filename(id: id)) ?? id).lineLimit(1)
+                                        Text(selectedID == id ? "当前选中 · 未接入正式播放" : "点击切换为当前测试音源")
+                                            .font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                }
                             }
+                            .buttonStyle(.plain)
                             Spacer()
                             Button("检查") { inspect(id: id) }
                                 .buttonStyle(.bordered)
@@ -31,6 +45,8 @@ struct LXSourceTestPanel: View {
                     .onDelete(perform: delete)
                 }
                 Section {
+                    Text("可导入多个音源，点击左侧圆圈切换当前测试音源。")
+                        .font(.caption).foregroundStyle(.secondary)
                     Button("从文件导入 .js 音源") { isImporterPresented = true }
                 }
                 if let message {
@@ -39,13 +55,18 @@ struct LXSourceTestPanel: View {
             }
             .navigationTitle("音源测试")
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("关闭") { dismiss() } } }
-            .fileImporter(isPresented: $isImporterPresented, allowedContentTypes: [.javascript, .plainText], allowsMultipleSelection: false) { result in
+            .fileImporter(isPresented: $isImporterPresented, allowedContentTypes: [.javascript, .plainText], allowsMultipleSelection: true) { result in
                 do {
-                    guard let file = try result.get().first else { return }
+                    let files = try result.get()
                     let library = try getLibrary()
-                    let script = try library.importScript(from: file)
+                    var imported: [String] = []
+                    var failed: [String] = []
+                    for file in files {
+                        do { imported.append(try library.importScript(from: file).filename) }
+                        catch { failed.append("\(file.lastPathComponent): \(error.localizedDescription)") }
+                    }
                     reload()
-                    message = "导入成功：\(script.filename)。请点击检查验证脚本初始化。"
+                    message = "已导入 \(imported.count) 个音源。\(failed.isEmpty ? "" : "失败：\(failed.joined(separator: "；"))")"
                 } catch { message = "导入失败：\(error.localizedDescription)" }
             }
             .onAppear { reload() }
@@ -61,7 +82,11 @@ struct LXSourceTestPanel: View {
     }
 
     private func reload() {
-        do { importedIDs = try getLibrary().listIdentifiers() }
+        do {
+            let store = try getLibrary()
+            importedIDs = try store.listIdentifiers()
+            selectedID = store.selectedID
+        }
         catch { message = "读取失败：\(error.localizedDescription)" }
     }
 
