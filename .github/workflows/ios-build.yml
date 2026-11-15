@@ -5,6 +5,7 @@ on:
     branches:
       - ios/initial-scaffold
       - home/final-design-asset-pass
+      - feature/official-collections-dual-source
   workflow_dispatch:
 
 permissions:
