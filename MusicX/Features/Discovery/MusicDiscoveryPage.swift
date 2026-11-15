@@ -1,13 +1,14 @@
 import SwiftUI
 
 enum MusicDiscoveryRoute: Identifiable {
-    case daily, playlists, charts, newReleases
+    case daily, featuredSongs, playlists, charts, newReleases
     case chart(String)
     case playlist(String)
     case album(title: String, artist: String)
     var id: String {
         switch self {
         case .daily: "daily"
+        case .featuredSongs: "featured-songs"
         case .playlists: "playlists"
         case .charts: "charts"
         case .newReleases: "new-releases"
@@ -51,6 +52,7 @@ struct MusicDiscoveryPage: View {
     private var title: String {
         switch route {
         case .daily: "每日推荐"
+        case .featuredSongs: "精选歌曲"
         case .playlists: "精选歌单"
         case .charts, .chart: "排行榜"
         case .newReleases: "新歌速递"
@@ -61,6 +63,7 @@ struct MusicDiscoveryPage: View {
     private var query: String {
         switch route {
         case .daily: "陈奕迅"
+        case .featuredSongs: "精选歌曲"
         case .playlists: "周杰伦"
         case .charts: "陈奕迅"
         case .chart(let name): name == "新歌榜" ? "新歌" : name == "飙升榜" ? "飙升" : "热歌"
@@ -89,7 +92,7 @@ struct MusicDiscoveryPage: View {
                 VStack(alignment: .leading, spacing: 24) {
                     topBar
                     switch route {
-                    case .daily: dailyHeader
+                    case .daily, .featuredSongs: dailyHeader
                     case .playlists: playlistIntro
                     case .charts, .chart: chartIntro
                     case .newReleases: newReleasesHeader
@@ -500,6 +503,8 @@ struct MusicDiscoveryPage: View {
             switch route {
             case .daily:
                 result = try await PlatformCollectionCatalog().firstCollectionSongs(provider: .qq, count: 50)
+            case .featuredSongs:
+                result = try await PlatformCollectionCatalog().firstCollectionSongs(provider: .netease, count: 50)
             case .charts:
                 result = try await service.toplist("热歌榜", count: 50)
             case .chart(let name):
