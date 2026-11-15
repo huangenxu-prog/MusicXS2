@@ -1,5 +1,6 @@
 import Foundation
 import JavaScriptCore
+import CryptoKit
 
 /// Experimental LX custom-source host. Not connected to the production resolver.
 /// Each instance owns one JSContext; call all methods on the main thread.
@@ -58,6 +59,10 @@ final class LXSourceScriptHost {
             if !error.isEmpty { self?.finish(id: id, result: .failure(HostError.initialization(error))) }
             else { self?.finish(id: id, result: .success(value)) }
         }
+        let md5: @convention(block) (String) -> String = { input in
+            Insecure.MD5.hash(data: Data(input.utf8)).map { String(format: "%02x", $0) }.joined()
+        }
+        context.setObject(md5, forKeyedSubscript: "__lxMD5" as NSString)
         context.setObject(network, forKeyedSubscript: "__lxHTTP" as NSString)
         context.setObject(complete, forKeyedSubscript: "__lxComplete" as NSString)
         context.setObject(registration, forKeyedSubscript: "__lxSend" as NSString)
@@ -186,7 +191,9 @@ final class LXSourceScriptHost {
                        updateAlert: 'updateAlert' };
       globalThis.lx = {
         EVENT_NAMES: EVENTS,
-        env: { platform: 'ios', version: '1.0.0' },
+        env: 'ios',
+        version: '2.0.0',
+        currentScriptInfo: { version: '1', name: 'LX custom source' },
         on: function (event, handler) { handlers[event] = handler; },
         send: function (event, payload) { __lxSend(event, payload); },
         request: function (url, options, callback) {
@@ -195,9 +202,25 @@ final class LXSourceScriptHost {
           __lxHTTP(url, options || {}, callback);
         },
         utils: {
+          crypto: {
+            md5: function (value) { return __lxMD5(String(value)); }
+          },
           buffer: {
-            from: function (str) { return String(str); },
-            bufToString: function (buf) { return String(buf); }
+            from: function (value, encoding) {
+              if (encoding === 'hex') {
+                const hex = String(value).replace(/[^0-9a-f]/gi, '');
+                const out = [];
+                for (let i = 0; i + 1 < hex.length; i += 2) out.push(parseInt(hex.slice(i, i + 2), 16));
+                return out;
+              }
+              if (Array.isArray(value)) return value;
+              return Array.from(unescape(encodeURIComponent(String(value))), c => c.charCodeAt(0));
+            },
+            bufToString: function (buf, encoding) {
+              if (encoding === 'hex') return Array.from(buf, n => Number(n).toString(16).padStart(2, '0')).join('');
+              if (Array.isArray(buf)) return decodeURIComponent(escape(String.fromCharCode.apply(null, buf)));
+              return String(buf);
+            }
           }
         }
       };
