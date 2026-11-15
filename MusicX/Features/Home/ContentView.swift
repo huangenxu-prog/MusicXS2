@@ -1775,20 +1775,9 @@ struct ContentView: View {
                     url = try await resolver.resolveFresh(song: onlineSong, quality: selectedMusicQuality)
                 } catch {
                     try Task.checkCancellation()
-                    let api = MusicXPlaybackAPI()
-                    guard api.isConfigured else { throw error }
-                    let resolution = try await api.refresh(
-                        song: onlineSong,
-                        failedSource: vpsResolvedSource ?? onlineSong.source.rawValue,
-                        failedTrackID: vpsResolvedTrackID,
-                        failedTrackMID: vpsResolvedTrackMID
-                    )
-                    guard let vpsURL = resolution.url else { throw MusicXPlaybackAPI.APIError.noPlayableURL }
-                    vpsResolvedSongID = song.id
-                    vpsResolvedSource = resolution.resolvedSource
-                    vpsResolvedTrackID = resolution.trackID
-                    vpsResolvedTrackMID = resolution.trackMID
-                    url = vpsURL
+                    // The resolver already exhausts the permitted native/pyncmd
+                    // providers. Do not bypass source policy through the VPS.
+                    throw error
                 }
                 try Task.checkCancellation()
                 guard playbackRequestID == requestID else { return }
@@ -2007,15 +1996,8 @@ struct ContentView: View {
                         url = try await resolver.resolve(song: onlineSong, quality: selectedMusicQuality)
                     } catch {
                         try Task.checkCancellation()
-                        let api = MusicXPlaybackAPI()
-                        guard onlineSong.source != .qq, api.isConfigured else { throw error }
-                        let resolution = try await api.resolve(song: onlineSong)
-                        guard let vpsURL = resolution.url else { throw MusicXPlaybackAPI.APIError.noPlayableURL }
-                        vpsResolvedSongID = song.id
-                        vpsResolvedSource = resolution.resolvedSource
-                        vpsResolvedTrackID = resolution.trackID
-                        vpsResolvedTrackMID = resolution.trackMID
-                        url = vpsURL
+                        // Never substitute an unrelated platform via the VPS.
+                        throw error
                     }
                     try Task.checkCancellation()
                     guard playbackRequestID == requestID else { return }
