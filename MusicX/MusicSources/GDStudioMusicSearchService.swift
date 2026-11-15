@@ -323,6 +323,45 @@ struct GDStudioMusicSearchService {
         return Array(playlists.prefix(count))
     }
 
+    /// Native QQ song search for LX diagnostics; independent of the GDStudio proxy.
+    func searchQQSongsNative(keyword: String, count: Int = 20) async throws -> [MusicSong] {
+        let query = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return [] }
+        let data = try await requestQQMusicU(
+            module: "music.search.SearchCgiService",
+            method: "DoSearchForQQMusicDesktop",
+            parameters: [
+                "query": query,
+                "num_per_page": min(max(count, 1), 30),
+                "page_num": 1,
+                "search_type": 0
+            ]
+        )
+        let body = data["body"] as? [String: Any] ?? [:]
+        let songContainer = body["song"] as? [String: Any] ?? [:]
+        let rows = (songContainer["list"] as? [[String: Any]])
+            ?? (body["songlist"] as? [[String: Any]])
+            ?? (body["list"] as? [[String: Any]])
+            ?? []
+        return rows.compactMap { row -> MusicSong? in
+            guard let mid = (row["mid"] as? String) ?? (row["songmid"] as? String),
+                  !mid.isEmpty else { return nil }
+            let singers = (row["singer"] as? [[String: Any]])?
+                .compactMap { $0["name"] as? String }.joined(separator: " / ")
+            let albumObject = row["album"] as? [String: Any]
+            let interval = (row["interval"] as? NSNumber)?.doubleValue
+            return MusicSong(
+                source: .qq, sourceID: mid,
+                title: (row["name"] as? String) ?? (row["songname"] as? String) ?? "",
+                artist: singers ?? (row["singer"] as? String) ?? "",
+                album: albumObject?["name"] as? String ?? row["albumname"] as? String,
+                artworkURL: nil, duration: interval, hash: nil,
+                albumID: albumObject?["mid"] as? String,
+                pictureID: nil, lyricID: nil
+            )
+        }
+    }
+
     /// Searches QQ Music's real playlist index and returns provider-native playlist metadata.
     func searchPlaylists(keyword: String, count: Int = 10) async throws -> [MusicPlaylist] {
         let query = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
