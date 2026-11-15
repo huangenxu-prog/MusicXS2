@@ -340,21 +340,18 @@ struct GDStudioMusicSearchService {
         let body = data["body"] as? [String: Any] ?? [:]
         let songContainer = body["song"] as? [String: Any] ?? [:]
         let songlistContainer = body["songlist"] as? [String: Any] ?? [:]
-        let rows = (songContainer["list"] as? [[String: Any]])
-            ?? (songlistContainer["list"] as? [[String: Any]])
-            ?? (body["songlist"] as? [[String: Any]])
-            ?? (body["list"] as? [[String: Any]])
-            ?? (data["songlist"] as? [[String: Any]])
-            ?? []
+        let candidates: [[[String: Any]]] = [
+            songContainer["list"] as? [[String: Any]] ?? [],
+            songlistContainer["list"] as? [[String: Any]] ?? [],
+            body["songlist"] as? [[String: Any]] ?? [],
+            body["list"] as? [[String: Any]] ?? []
+        ]
+        let rows = candidates.first(where: { !$0.isEmpty }) ?? []
         if rows.isEmpty {
-            let bodyKeys = body.keys.sorted().joined(separator: ",")
-            let songKeys = songContainer.keys.sorted().joined(separator: ",")
-            let songlistKeys = songlistContainer.keys.sorted().joined(separator: ",")
-            throw MusicSourceError.invalidResponse(
-                "QQ 搜索返回空列表或未知结构；body=[\(bodyKeys)] song=[\(songKeys)] songlist=[\(songlistKeys)]"
-            )
+            let counts = candidates.map { String($0.count) }.joined(separator: ",")
+            throw MusicSourceError.invalidResponse("QQ 搜索列表为空；各候选列表数量=[\(counts)]")
         }
-        return rows.compactMap { row -> MusicSong? in
+        let parsed = rows.compactMap { row -> MusicSong? in
             guard let mid = (row["mid"] as? String) ?? (row["songmid"] as? String),
                   !mid.isEmpty else { return nil }
             let singers = (row["singer"] as? [[String: Any]])?
@@ -371,6 +368,11 @@ struct GDStudioMusicSearchService {
                 pictureID: nil, lyricID: nil
             )
         }
+        if parsed.isEmpty {
+            let fields = rows.first.map { $0.keys.sorted().joined(separator: ",") } ?? ""
+            throw MusicSourceError.invalidResponse("QQ 搜索返回 \(rows.count) 条，但无法提取 MID；首条字段=[\(fields)]")
+        }
+        return parsed
     }
 
     /// Searches QQ Music's real playlist index and returns provider-native playlist metadata.
