@@ -339,10 +339,21 @@ struct GDStudioMusicSearchService {
         )
         let body = data["body"] as? [String: Any] ?? [:]
         let songContainer = body["song"] as? [String: Any] ?? [:]
+        let songlistContainer = body["songlist"] as? [String: Any] ?? [:]
         let rows = (songContainer["list"] as? [[String: Any]])
+            ?? (songlistContainer["list"] as? [[String: Any]])
             ?? (body["songlist"] as? [[String: Any]])
             ?? (body["list"] as? [[String: Any]])
+            ?? (data["songlist"] as? [[String: Any]])
             ?? []
+        if rows.isEmpty {
+            let bodyKeys = body.keys.sorted().joined(separator: ",")
+            let songKeys = songContainer.keys.sorted().joined(separator: ",")
+            let songlistKeys = songlistContainer.keys.sorted().joined(separator: ",")
+            throw MusicSourceError.invalidResponse(
+                "QQ 搜索返回空列表或未知结构；body=[\(bodyKeys)] song=[\(songKeys)] songlist=[\(songlistKeys)]"
+            )
+        }
         return rows.compactMap { row -> MusicSong? in
             guard let mid = (row["mid"] as? String) ?? (row["songmid"] as? String),
                   !mid.isEmpty else { return nil }
