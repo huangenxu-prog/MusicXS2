@@ -56,6 +56,7 @@ struct LXBridgeSmokeTest {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [LXMockURLProtocol.self]
         let session = URLSession(configuration: config)
+        LXMockURLProtocol.reset()
         let xinghai = try LXSourceScriptHost(script: fixture, session: session)
         guard xinghai.registeredSources["tx"] != nil else {
             throw NSError(domain: "LXSmoke", code: 5, userInfo: [NSLocalizedDescriptionKey: "Xinghai QQ registration missing"])
@@ -66,6 +67,9 @@ struct LXBridgeSmokeTest {
             quality: "320k",
             timeout: 8
         )
+        guard LXMockURLProtocol.receivedTokenRequest, LXMockURLProtocol.receivedAuthorizedQQRequest else {
+            throw NSError(domain: "LXSmoke", code: 7, userInfo: [NSLocalizedDescriptionKey: "Xinghai token or authenticated QQ request missing"])
+        }
         guard xinghaiURL.absoluteString == "https://example.com/xinghai-test.mp3" else {
             throw NSError(domain: "LXSmoke", code: 6, userInfo: [NSLocalizedDescriptionKey: "Xinghai mock URL mismatch"])
         }
@@ -74,6 +78,12 @@ struct LXBridgeSmokeTest {
 }
 
 final class LXMockURLProtocol: URLProtocol {
+    private static let lock = NSLock()
+    private static var tokenRequest = false
+    private static var authorizedQQRequest = false
+    static var receivedTokenRequest: Bool { lock.lock(); defer { lock.unlock() }; return tokenRequest }
+    static var receivedAuthorizedQQRequest: Bool { lock.lock(); defer { lock.unlock() }; return authorizedQQRequest }
+    static func reset() { lock.lock(); defer { lock.unlock() }; tokenRequest = false; authorizedQQRequest = false }
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
@@ -81,8 +91,14 @@ final class LXMockURLProtocol: URLProtocol {
         let path = url.path
         let json: String
         if path.hasSuffix("/token.php") {
+            Self.lock.lock(); Self.tokenRequest = true; Self.lock.unlock()
             json = #"{"data":{"token":"xh3.test-token"}}"#
         } else if path == "/lx/api/" || path == "/lx/api" {
+            let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let isQQ = query.contains { $0.name == "source" && $0.value == "qq" }
+            let isSong = query.contains { $0.name == "songmid" && $0.value == "TESTMID" }
+            let token = request.value(forHTTPHeaderField: "X-Token")
+            Self.lock.lock(); Self.authorizedQQRequest = isQQ && isSong && token == "xh3.test-token"; Self.lock.unlock()
             json = #"{"code":200,"url":"https://example.com/xinghai-test.mp3"}"#
         } else if path == "/ip.php" {
             json = #"{"ip":"127.0.0.1"}"#
