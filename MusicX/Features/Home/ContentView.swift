@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 
 private enum MainTab: String, CaseIterable {
     case home = "首页"
@@ -21,23 +22,15 @@ private struct AppSong: Identifiable, Equatable {
     let album: String
     let tint: Color
     let onlineSong: MusicSong?
-    let localFileURL: URL?
 
-    init(id: Int, title: String, artist: String, album: String, tint: Color, onlineSong: MusicSong? = nil, localFileURL: URL? = nil) {
+    init(id: Int, title: String, artist: String, album: String, tint: Color, onlineSong: MusicSong? = nil) {
         self.id = id
         self.title = title
         self.artist = artist
         self.album = album
         self.tint = tint
         self.onlineSong = onlineSong
-        self.localFileURL = localFileURL
     }
-}
-
-private struct DownloadedTrack: Codable, Identifiable {
-    let id: Int
-    let song: MusicSong
-    let fileName: String
 }
 
 private struct LibraryArtist: Identifiable {
@@ -45,6 +38,14 @@ private struct LibraryArtist: Identifiable {
     let song: AppSong
     let count: Int
     var id: String { artist }
+}
+
+private struct LibraryAlbum: Identifiable {
+    let title: String
+    let artist: String
+    let song: AppSong
+    let count: Int
+    var id: String { "\(title)-\(artist)" }
 }
 
 private enum LibraryFilter: String, CaseIterable {
@@ -95,37 +96,9 @@ private enum PlayerDisplayMode: CaseIterable, Hashable {
 
 private struct MusicXPageBackground: View {
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.018, green: 0.040, blue: 0.095),
-                    Color(red: 0.025, green: 0.055, blue: 0.115),
-                    Color(red: 0.014, green: 0.030, blue: 0.075)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            RadialGradient(
-                colors: [Color(red: 0.08, green: 0.24, blue: 0.48).opacity(0.30), .clear],
-                center: .top,
-                startRadius: 12,
-                endRadius: 470
-            )
-            RadialGradient(
-                colors: [Color(red: 0.12, green: 0.20, blue: 0.48).opacity(0.20), .clear],
-                center: .bottomTrailing,
-                startRadius: 8,
-                endRadius: 420
-            )
-            RadialGradient(
-                colors: [Color(red: 0.20, green: 0.10, blue: 0.36).opacity(0.12), .clear],
-                center: .bottomLeading,
-                startRadius: 4,
-                endRadius: 360
-            )
-        }
-        .ignoresSafeArea()
-        .allowsHitTesting(false)
+        Color(red: 10/255, green: 14/255, blue: 31/255)
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
     }
 }
 
@@ -133,64 +106,77 @@ struct ContentView: View {
     @State private var selectedTab: MainTab = .home
     @Namespace private var tabSelectionNamespace
     @State private var searchText = ""
-    @State private var searchSuggestions = ["十年", "突然好想你", "晴天", "青花瓷", "稻香", "后来", "演员", "夜曲", "富士山下", "海阔天空"].shuffled().prefix(4).map { $0 }
+    @State private var searchSuggestions = ["十年", "突然好想你", "晴天", "青花瓷"]
     @FocusState private var searchFieldFocused: Bool
     @State private var libraryFilter: LibraryFilter = .recent
     @State private var libraryContentType: LibraryContentType = .songs
+    @State private var isLocalMusicAlertPresented = false
     @State private var currentSong: AppSong?
     @State private var isSeekingProgress = false
     @State private var seekPreviewTime: TimeInterval = 0
     @StateObject private var playerStore = PlayerStore()
     @State private var onlineResults: [AppSong] = []
     @State private var isSearching = false
+    @State private var searchRequestID = UUID()
     @State private var searchError: String?
     @State private var isPlayerPresented = false
     @State private var playbackRequestID = UUID()
     @State private var playbackTask: Task<Void, Never>?
+    @State private var playbackPrefetchTask: Task<Void, Never>?
     @State private var playbackQueueSongs: [AppSong] = []
+    @State private var shuffleHistory: [Int] = []
+    @State private var shuffleForwardHistory: [Int] = []
     @State private var hasCustomPlaybackQueue = false
     @State private var isResolvingSong = false
     @State private var failedPlaybackSongIDs: Set<Int> = []
-    @State private var refreshedPlaybackSongIDs: Set<Int> = []
+    @State private var playbackRetryCounts: [Int: Int] = [:]
+    @State private var vpsResolvedSongID: Int?
+    @State private var vpsResolvedSource: String?
+    @State private var vpsResolvedTrackID: String?
+    @State private var vpsResolvedTrackMID: String?
     @AppStorage("musicx.favoriteIDs") private var favoriteIDs = "1,3"
     @AppStorage("musicx.recentIDs") private var recentIDs = ""
     @AppStorage("musicx.recentSongs") private var recentSongsJSON = "[]"
     @AppStorage("musicx.favoriteSongs") private var favoriteSongsJSON = "[]"
-    @AppStorage("musicx.downloadedTracks") private var downloadedTracksJSON = "[]"
     @AppStorage("musicx.playbackQuality") private var playbackQualityRaw = MusicQuality.high.rawValue
 
     private var selectedMusicQuality: MusicQuality {
         MusicQuality(rawValue: playbackQualityRaw) ?? .high
     }
-    @State private var isDownloading = false
-    @State private var downloadMessage: String?
-    @State private var isDownloadAlertPresented = false
 
     private var favorites: Set<Int> {
         Set(favoriteIDs.split(separator: ",").compactMap { Int($0) })
     }
 
+    private func isLibraryEligible(_ song: AppSong) -> Bool {
+        song.onlineSong?.source != .kuwo
+    }
+
     private var recentSongs: [AppSong] {
-        let stored = decodeLibrarySongs(recentSongsJSON).map { appSong(from: $0) }
+        let stored = decodeLibrarySongs(recentSongsJSON)
+            .filter { $0.source != .kuwo }
+            .map { appSong(from: $0) }
         var available = stored
         available.append(contentsOf: songs)
         available.append(contentsOf: onlineResults)
         available.append(contentsOf: playbackQueueSongs)
         if let currentSong { available.append(currentSong) }
-        available = uniqueLibrarySongs(available)
+        available = uniqueLibrarySongs(available).filter(isLibraryEligible)
         let ids = recentIDs.split(separator: ",").compactMap { Int($0) }
         let ordered = ids.compactMap { id in available.first { $0.id == id } }
         return ordered.isEmpty ? stored : ordered
     }
 
     private var favoriteSongs: [AppSong] {
-        let stored = decodeLibrarySongs(favoriteSongsJSON).map { appSong(from: $0) }
+        let stored = decodeLibrarySongs(favoriteSongsJSON)
+            .filter { $0.source != .kuwo }
+            .map { appSong(from: $0) }
         var available = stored
         available.append(contentsOf: songs)
         available.append(contentsOf: onlineResults)
         available.append(contentsOf: playbackQueueSongs)
         if let currentSong { available.append(currentSong) }
-        available = uniqueLibrarySongs(available)
+        available = uniqueLibrarySongs(available).filter(isLibraryEligible)
         let ids = favorites
         let current = available.filter { ids.contains($0.id) }
         return uniqueLibrarySongs(stored + current).filter { ids.contains($0.id) }
@@ -218,38 +204,14 @@ struct ContentView: View {
         return value
     }
 
-    private var downloadedTracks: [DownloadedTrack] {
-        guard let data = downloadedTracksJSON.data(using: .utf8),
-              let tracks = try? JSONDecoder().decode([DownloadedTrack].self, from: data) else { return [] }
-        return tracks
-    }
-
-    private var downloadedSongs: [AppSong] {
-        let folder = downloadsDirectory
-        return downloadedTracks.compactMap { track in
-            let url = folder.appendingPathComponent(track.fileName)
-            guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-            return AppSong(id: track.id, title: track.song.title, artist: track.song.artist,
-                           album: track.song.album ?? "", tint: MusicXTheme.blue,
-                           onlineSong: track.song, localFileURL: url)
-        }
-    }
-
-    private var isCurrentSongDownloaded: Bool {
-        guard let currentSong else { return false }
-        return downloadedSongs.contains { downloaded in downloaded.id == currentSong.id }
-    }
-
-    private var downloadsDirectory: URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("MusicXDownloads", isDirectory: true)
-    }
-
     @State private var songs: [AppSong] = []
-    @State private var recommendationSongs: [AppSong] = []
+    @State private var homeOfficialCollections: [MusicPlaylist] = []
+    @State private var isLoadingOfficialCollections = false
+    @State private var officialCollectionsError: String?
     @State private var isLoadingHomeSongs = false
     @State private var homeLoadError: String?
     @State private var discoveryRoute: MusicDiscoveryRoute?
+    @State private var isDiscoveryPopping = false
     @State private var isSettingsAlertPresented = false
 
     private var filteredSongs: [AppSong] {
@@ -273,7 +235,68 @@ struct ContentView: View {
         }
     }
 
+    private var libraryAlbums: [LibraryAlbum] {
+        let grouped = Dictionary(grouping: librarySongs) { song in
+            let album = song.album.trimmingCharacters(in: .whitespacesAndNewlines)
+            return album.isEmpty ? song.title : album
+        }
+        return grouped.keys.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }.compactMap { title in
+            guard let tracks = grouped[title], let first = tracks.first else { return nil }
+            return LibraryAlbum(title: title, artist: first.artist, song: first, count: tracks.count)
+        }
+    }
+
     var body: some View {
+        finalAppView
+    }
+
+    private var finalAppView: some View {
+        presentationView
+            .onChange(of: discoveryRoute?.id) { oldValue, newValue in
+                if oldValue == nil && newValue != nil { isDiscoveryPopping = false }
+            }
+            .task { await loadHomeSongs() }
+            .task { await loadOfficialCollections() }
+    }
+
+    private var presentationView: some View {
+        playbackView
+            .overlay { discoveryOverlay }
+            .animation(.easeInOut(duration: 0.28), value: discoveryRoute?.id)
+            .overlay { playerOverlay }
+            .animation(.easeInOut(duration: 0.28), value: isPlayerPresented)
+            .animation(.easeInOut(duration: 0.28), value: selectedTab)
+    }
+
+    private var playbackView: some View {
+        appContent
+            .preferredColorScheme(.dark)
+            .confirmationDialog("播放设置", isPresented: $isSettingsAlertPresented, titleVisibility: .visible) {
+                Button("标准音质 · 128 kbps") { playbackQualityRaw = MusicQuality.standard.rawValue }
+                Button("高音质 · 320 kbps") { playbackQualityRaw = MusicQuality.high.rawValue }
+                Button("无损音质") { playbackQualityRaw = MusicQuality.lossless.rawValue }
+                Button("Hi-Res") { playbackQualityRaw = MusicQuality.hires.rawValue }
+                Button("取消", role: .cancel) { }
+            } message: {
+                Text("当前音质：\(qualityDisplayName(selectedMusicQuality))。不同音源实际支持的最高音质可能不同。")
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .musicXRemoteNextTrack)) { _ in
+                stepSong(by: 1)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .musicXRemotePreviousTrack)) { _ in
+                stepSong(by: -1)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .musicXPlaybackDidFinish)) { _ in
+                playNextAfterNaturalFinish()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .musicXPlaybackFailed)) { notification in
+                guard let failedItem = notification.object as? AVPlayerItem,
+                      playerStore.isCurrentItem(failedItem) else { return }
+                retryCurrentSongWithFreshURL()
+            }
+    }
+
+    private var appContent: some View {
         ZStack {
             MusicXPageBackground()
             Group {
@@ -283,10 +306,10 @@ struct ContentView: View {
                 case .library: libraryPage
                 }
             }
-            .ignoresSafeArea(edges: selectedTab == .home ? .top : [])
+            .id(selectedTab)
+            .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-         .background { MusicXPageBackground() }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !(selectedTab == .search && searchFieldFocused) {
                 VStack(spacing: 8) {
@@ -295,6 +318,7 @@ struct ContentView: View {
                 }
                 .padding(.top, 8)
                 .padding(.bottom, 0)
+                .offset(y: 16)
                 .zIndex(20)
                 .background {
                     LinearGradient(colors: [Color(red: 0.015, green: 0.035, blue: 0.085).opacity(0.02),
@@ -304,127 +328,199 @@ struct ContentView: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
-        .fullScreenCover(isPresented: $isPlayerPresented) { nowPlayingPage }
-        .confirmationDialog("播放设置", isPresented: $isSettingsAlertPresented, titleVisibility: .visible) {
-            Button("标准音质 · 128 kbps") { playbackQualityRaw = MusicQuality.standard.rawValue }
-            Button("高音质 · 320 kbps") { playbackQualityRaw = MusicQuality.high.rawValue }
-            Button("无损音质") { playbackQualityRaw = MusicQuality.lossless.rawValue }
-            Button("Hi-Res") { playbackQualityRaw = MusicQuality.hires.rawValue }
-            Button("取消", role: .cancel) { }
-        } message: {
-            Text("当前音质：\(qualityDisplayName(selectedMusicQuality))。不同音源实际支持的最高音质可能不同。")
-        }
-        .alert("下载歌曲", isPresented: $isDownloadAlertPresented) {
-            Button("确定", role: .cancel) { }
-        } message: {
-            Text(downloadMessage ?? "操作完成")
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .musicXRemoteNextTrack)) { _ in
-            stepSong(by: 1)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .musicXRemotePreviousTrack)) { _ in
-            stepSong(by: -1)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .musicXPlaybackDidFinish)) { _ in
-            playNextAfterNaturalFinish()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .musicXPlaybackFailed)) { _ in
-            retryCurrentSongWithFreshURL()
-        }
-        .fullScreenCover(item: $discoveryRoute) { route in
-            MusicDiscoveryPage(route: route, onClose: { discoveryRoute = nil },
+    }
+
+    @ViewBuilder
+    private var discoveryOverlay: some View {
+        if let route = discoveryRoute {
+            MusicDiscoveryPage(
+                route: route,
+                featuredAlbums: [],
+                selectedMainTab: selectedTab.rawValue,
+                onSelectMainTab: { title in
+                    isDiscoveryPopping = true
+                    withAnimation(.easeInOut(duration: 0.28)) {
+                        selectedTab = MainTab.allCases.first(where: { $0.rawValue == title }) ?? .home
+                        discoveryRoute = nil
+                    }
+                },
+                onClose: { _ in
+                    isDiscoveryPopping = true
+                    withAnimation(.easeInOut(duration: 0.28)) { discoveryRoute = nil }
+                },
                 onPlay: { playDiscoverySong($0) },
                 currentSong: currentSong?.onlineSong,
                 isPlaying: playerStore.isPlaying,
                 onTogglePlayback: { playerStore.togglePlayback() },
                 onOpenPlayer: { isPlayerPresented = true },
-                onQueueChanged: { playbackQueueSongs = $0.map { AppSong(id: stableSongID($0), title: $0.title, artist: $0.artist, album: $0.album ?? "", tint: MusicXTheme.blue, onlineSong: $0) }; hasCustomPlaybackQueue = true }, 
+                onPrevious: { stepSong(by: -1) },
+                onNext: { stepSong(by: 1) },
+                onOpenQueue: { playerDisplayMode = .queue; isPlayerPresented = true },
+                onQueueChanged: {
+                    playbackQueueSongs = $0.map {
+                        AppSong(id: stableSongID($0), title: $0.title, artist: $0.artist,
+                                album: $0.album ?? "", tint: MusicXTheme.blue, onlineSong: $0)
+                    }
+                    hasCustomPlaybackQueue = true
+                    resetShuffleHistory()
+                },
                 currentTime: playerStore.currentTime,
                 duration: playerStore.duration,
-                onOpenPlaylist: { discoveryRoute = .playlist($0) },
-                onSelectChart: { discoveryRoute = .chart($0) })
+                onOpenPlaylist: { playlistID in
+                    isDiscoveryPopping = false
+                    withAnimation(.easeInOut(duration: 0.28)) { discoveryRoute = .playlistByID(playlistID) }
+                },
+                onOpenPlaylistKeyword: { keyword in
+                    isDiscoveryPopping = false
+                    withAnimation(.easeInOut(duration: 0.28)) { discoveryRoute = .playlist(keyword) }
+                },
+                onOpenFeaturedPick: {
+                    isDiscoveryPopping = false
+                    withAnimation(.easeInOut(duration: 0.28)) { discoveryRoute = .featuredPick }
+                },
+                onOpenAlbum: { title, artist in
+                    isDiscoveryPopping = false
+                    withAnimation(.easeInOut(duration: 0.28)) { discoveryRoute = .album(title: title, artist: artist) }
+                },
+                onSelectChart: { chart in
+                    isDiscoveryPopping = false
+                    withAnimation(.easeInOut(duration: 0.28)) { discoveryRoute = .chart(chart) }
+                }
+            )
+            .id(route.id)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(MusicXPageBackground())
+            .transition(.asymmetric(
+                insertion: .move(edge: isDiscoveryPopping ? .leading : .trailing),
+                removal: .move(edge: isDiscoveryPopping ? .trailing : .leading)
+            ))
+            .zIndex(30)
         }
-        .task { await loadHomeSongs() }
+    }
+
+    @ViewBuilder
+    private var playerOverlay: some View {
+        if isPlayerPresented {
+            nowPlayingPage
+                .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .trailing)))
+                .zIndex(40)
+        }
     }
 
     private var homePage: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 15) {
-                HomeScrollBounceDisabler().frame(width: 0, height: 0)
-                heroAndRecommendation
-                chartSection
-                newMusicSection
-                albumSection
-                editorialPlaylistSection
-                forYouSection
+        ZStack(alignment: .top) {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 15) {
+                    HomeScrollBounceDisabler().frame(width: 0, height: 0)
+                    heroAndRecommendation
+                    chartSection
+                    newMusicSection
+                    featuredCollectionSection
+                }
+                .padding(.top, 0)
+                .padding(.bottom, 8)
             }
-            .padding(.top, 0)
-            .padding(.bottom, 8)
+            .scrollBounceBehavior(.basedOnSize)
         }
-        .scrollBounceBehavior(.basedOnSize)
+        .background {
+            let navy = Color(red: 10/255, green: 14/255, blue: 31/255)
+
+            LinearGradient(
+                stops: [
+                    .init(color: Color(red: 30/255,  green: 42/255,  blue: 107/255), location: 0.00),
+                    .init(color: Color(red: 75/255,  green: 52/255,  blue: 144/255), location: 0.25),
+                    .init(color: Color(red: 154/255, green: 79/255,  blue: 143/255), location: 0.45),
+                    .init(color: Color(red: 232/255, green: 112/255, blue: 138/255), location: 0.64),
+                    .init(color: Color(red: 248/255, green: 176/255, blue: 104/255), location: 0.75),
+                    .init(color: Color(red: 122/255, green: 74/255,  blue: 120/255), location: 0.85),
+                    .init(color: navy,                                               location: 1.00)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 200)
+            .frame(maxWidth: .infinity)
+            .frame(maxHeight: .infinity, alignment: .top)
+            .ignoresSafeArea(edges: .top)
+            .allowsHitTesting(false)
+        }
         .ignoresSafeArea(edges: .top)
     }
 
     private var heroAndRecommendation: some View {
-        VStack(alignment: .leading, spacing: 0) { heroHeader; recommendationSection }
+        VStack(alignment: .leading, spacing: 10) { heroHeader; recommendationSection }
     }
 
+    // DESIGN LOCK: fixed vinyl-record hero artwork from the approved home reference.
+    // Home hero follows the supplied gradient-header reference.
     private var heroHeader: some View {
-        GeometryReader { proxy in
-            ZStack(alignment: .topLeading) {
-                LinearGradient(stops: [
-                    .init(color: Color(red: 0.10, green: 0.16, blue: 0.39), location: 0),
-                    .init(color: Color(red: 0.30, green: 0.19, blue: 0.55), location: 0.40),
-                    .init(color: Color(red: 0.66, green: 0.29, blue: 0.53), location: 0.64),
-                    .init(color: Color(red: 1.00, green: 0.57, blue: 0.39), location: 0.80),
-                    .init(color: MusicXTheme.background, location: 1)
-                ], startPoint: .top, endPoint: .bottom)
-                RadialGradient(colors: [Color(red: 1.0, green: 0.62, blue: 0.43).opacity(0.92), .clear],
-                               center: .init(x: 0.52, y: 0.80), startRadius: 2, endRadius: proxy.size.width * 0.78)
-                VStack(alignment: .leading, spacing: 7) {
-                    Text("发现音乐").font(.system(size: 43, weight: .regular)).foregroundStyle(.white)
-                    Text("— 好音乐，总在心里 —").font(.system(size: 16)).tracking(2).foregroundStyle(.white.opacity(0.94))
-                }
-                .padding(.leading, 20).padding(.top, 66)
-            }
-            .frame(width: proxy.size.width, height: proxy.size.height)
+        VStack(alignment: .leading, spacing: 7) {
+            Text("发现音乐")
+                .font(.system(size: 34, weight: .bold))
+                .tracking(0.1)
+                .foregroundStyle(.white)
+            Text("— 好音乐，总在心里 —")
+                .font(.system(size: 13, weight: .medium))
+                .tracking(1.25)
+                .foregroundStyle(.white.opacity(0.90))
         }
-        .frame(height: 198).frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 122, alignment: .bottomLeading)
+        .padding(.horizontal, 20)
+        .padding(.top, 56)
+        .offset(y: -63)
         .accessibilityElement(children: .combine)
     }
 
+    // Two rectangular gradient entry cards, matching the supplied home reference.
     private var recommendationSection: some View {
         GeometryReader { proxy in
-            let inset: CGFloat = 16
-            let gap: CGFloat = 13
-            let width = max(0, (proxy.size.width - inset * 2 - gap) / 2)
+            let gap: CGFloat = 12
+            let width = max(0, (proxy.size.width - gap) / 2)
             HStack(spacing: gap) {
-                recommendationTile(title: "每日推荐", subtitle: "每日更新", icon: "play.fill",
-                    colors: [Color(red: 0.98, green: 0.62, blue: 0.34), Color(red: 0.55, green: 0.25, blue: 0.48)], route: .daily, width: width)
-                recommendationTile(title: "精选歌曲", subtitle: "遇见更好的自己", icon: "text.alignleft",
-                    colors: [Color(red: 0.55, green: 0.39, blue: 0.91), Color(red: 0.22, green: 0.13, blue: 0.56)], route: .featuredSongs, width: width)
-            }.padding(.horizontal, inset)
-        }.frame(height: 112)
+                recommendationTile(
+                    title: "每日推荐", subtitle: "每日更新", icon: "play.fill",
+                    colors: [Color(red: 0.98, green: 0.61, blue: 0.36), Color(red: 0.70, green: 0.25, blue: 0.48)],
+                    route: .daily, width: width
+                )
+                recommendationTile(
+                    title: "精选歌曲", subtitle: "遇见更好的自己", icon: "text.alignleft",
+                    colors: [Color(red: 0.52, green: 0.36, blue: 0.91), Color(red: 0.22, green: 0.12, blue: 0.55)],
+                    route: .featuredPick, width: width
+                )
+            }
+        }
+        .frame(height: 84)
+        .padding(.horizontal, 16)
     }
 
     private func recommendationTile(title: String, subtitle: String, icon: String, colors: [Color], route: MusicDiscoveryRoute, width: CGFloat) -> some View {
-        Button { discoveryRoute = route } label: {
+        return Button { discoveryRoute = route } label: {
             ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 23, style: .continuous).fill(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing))
-                RadialGradient(colors: [.white.opacity(0.24), .clear], center: .topLeading, startRadius: 3, endRadius: 180)
-                    .clipShape(RoundedRectangle(cornerRadius: 23, style: .continuous))
-                VStack(alignment: .leading, spacing: 2) {
-                    Image(systemName: icon).font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
-                        .frame(width: 25, height: 25).background(.white.opacity(0.25), in: Circle())
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(LinearGradient(colors: colors + [colors.last!.opacity(0.52)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                Circle()
+                    .fill(.white.opacity(0.18))
+                    .frame(width: 76, height: 76)
+                    .blur(radius: 22)
+                    .offset(x: width * 0.58, y: -23)
+                VStack(alignment: .leading, spacing: 0) {
+                    Image(systemName: icon)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 27, height: 27)
+                        .background(.white.opacity(0.22), in: Circle())
+                        .overlay(Circle().stroke(.white.opacity(0.22), lineWidth: 0.8))
                     Spacer(minLength: 0)
-                    Text(title).font(.system(size: 18, weight: .bold)).foregroundStyle(.white)
-                    Text(subtitle).font(.system(size: 14)).foregroundStyle(.white.opacity(0.92))
-                }.padding(.leading, 14).padding(.vertical, 10)
+                    Text(title).font(.system(size: 17, weight: .bold)).foregroundStyle(.white).lineLimit(1)
+                    Text(subtitle).font(.system(size: 12, weight: .medium)).foregroundStyle(.white.opacity(0.86))
+                        .lineLimit(1).minimumScaleFactor(0.75).padding(.top, 2)
+                }.padding(.leading, 15).padding(.vertical, 10)
             }
-            .frame(width: width, height: 86)
-            .clipShape(RoundedRectangle(cornerRadius: 23, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 23, style: .continuous).stroke(.white.opacity(0.28), lineWidth: 1))
+            .frame(width: width, height: 84)
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(.white.opacity(0.26), lineWidth: 0.9))
+            .shadow(color: colors.first?.opacity(0.20) ?? .clear, radius: 10, y: 4)
         }.buttonStyle(.plain)
     }
 
@@ -466,7 +562,7 @@ struct ContentView: View {
                         let song = songs[index]
                         homeSongRow(song)
                         if song.id != songs.prefix(6).last?.id {
-                            Rectangle().fill(.white.opacity(0.12)).frame(height: 0.5).padding(.leading, 42)
+                            Rectangle().fill(.white.opacity(0.12)).frame(height: 0.5)
                         }
                     }
                 }.padding(.horizontal, 20)
@@ -474,115 +570,130 @@ struct ContentView: View {
         }
     }
 
-    private var albumSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            homeSectionTitle("热门专辑", action: { discoveryRoute = .album(title: "DUO", artist: "陈奕迅") }).padding(.horizontal, 14)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(0..<5, id: \.self) { index in
-                        staticAlbumTile(index: index, width: 132)
-                    }
-                }.padding(.horizontal, 14)
-            }
-        }
+    private var officialCollectionsGridHeight: CGFloat {
+        let columns = 3
+        let rows = (homeOfficialCollections.count + columns - 1) / columns
+        let cellWidth = max(0, (UIScreen.main.bounds.width - 28 - 24) / CGFloat(columns))
+        let rowSpacing = CGFloat(max(0, rows - 1)) * 14
+        let rowContentHeight = CGFloat(rows) * 44
+        return max(0, cellWidth * CGFloat(rows) + rowSpacing + rowContentHeight)
     }
 
-    private func staticAlbumTile(index: Int, width: CGFloat) -> some View {
-        let titles = ["DUO", "最伟大的作品", "宇宙的有趣", "A-Lin", "幼鸟指南"]
-        let artists = ["陈奕迅", "周杰伦", "告五人", "LINK", "毛不易"]
-        return Button { discoveryRoute = .album(title: titles[index], artist: artists[index]) } label: {
-            ZStack(alignment: .bottomLeading) {
-                Image("album_0\(index + 1)")
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: width, height: 132)
-                    .clipped()
-                LinearGradient(colors: [.clear, .black.opacity(0.76)], startPoint: .center, endPoint: .bottom)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(titles[index]).font(.system(size: 10, weight: .bold)).foregroundStyle(.white).lineLimit(1)
-                    Text(artists[index]).font(.system(size: 9, weight: .medium)).foregroundStyle(.white.opacity(0.86)).lineLimit(1)
-                }.padding(.horizontal, 5).padding(.bottom, 5)
-            }
-            .frame(width: width, height: 132)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-         }.buttonStyle(.plain)
-    }
-
-    private var chartSection: some View {
-        VStack(alignment: .leading, spacing: 13) {
-            homeSectionTitle("排行榜", action: nil).padding(.horizontal, 16)
-            GeometryReader { proxy in
-                let width = max(0, (proxy.size.width - 52) / 3)
+    @ViewBuilder
+    private var featuredCollectionSection: some View {
+        // Keep the section out of the interface until real platform playlists arrive.
+        // Loading state and backend/provider details are intentionally not exposed.
+        if !homeOfficialCollections.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 10) {
-                    chartTile("热歌榜", subtitle: "Top 50", rank: "01", color: Color(red: 0.83, green: 0.37, blue: 0.25), width: width)
-                    chartTile("飙升榜", subtitle: "热度上升", rank: "02", color: Color(red: 0.49, green: 0.30, blue: 0.88), width: width)
-                    chartTile("新歌榜", subtitle: "最新 50 首", rank: "03", color: Color(red: 0.08, green: 0.55, blue: 0.72), width: width)
-                }.padding(.horizontal, 16)
-            }.frame(height: 107)
-        }
-    }
-
-    private var editorialPlaylistSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            homeSectionTitle("精选歌单", action: { discoveryRoute = .playlists }, actionTitle: "全部")
-                .padding(.horizontal, 14)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 12) {
-                    editorialPlaylistCard(title: "本周编辑精选", subtitle: "本周精选", asset: "category_singers")
-                    editorialPlaylistCard(title: "华语流行精选", subtitle: "宝藏好歌 · 华语流行", asset: "category_chinese_pop")
-                    editorialPlaylistCard(title: "经典金曲精选", subtitle: "经久不衰的动人歌声", asset: "category_classic")
-                    editorialPlaylistCard(title: "独立音乐精选", subtitle: "Indie Music · 独立音乐聚落", asset: "category_instrumental")
-                    editorialPlaylistCard(title: "影视原声精选", subtitle: "问心系列 · 影视原声带", asset: "category_light")
-                    editorialPlaylistCard(title: "通勤驾驶精选", subtitle: "通勤路上 · 有前行感的节奏", asset: "category_rock")
+                    Capsule().fill(MusicXTheme.blue).frame(width: 3, height: 21)
+                    Text("推荐歌单").font(.system(size: 20, weight: .bold)).foregroundStyle(.white)
+                    Spacer()
                 }
                 .padding(.horizontal, 14)
+
+                GeometryReader { proxy in
+                    let gap: CGFloat = 12
+                    let width = max(0, (proxy.size.width - 28 - gap * 2) / 3)
+                    LazyVGrid(
+                        columns: Array(repeating: GridItem(.flexible(), spacing: gap, alignment: .top), count: 3),
+                        alignment: .center,
+                        spacing: 14
+                    ) {
+                        ForEach(homeOfficialCollections) { collection in
+                            officialCollectionTile(collection: collection, width: width)
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .frame(maxWidth: .infinity, alignment: .top)
+                }
+                .frame(height: officialCollectionsGridHeight)
             }
         }
     }
 
-    private func editorialPlaylistCard(title: String, subtitle: String, asset: String) -> some View {
-        Button { discoveryRoute = .playlist(title) } label: {
+    private func officialCollectionTile(collection: MusicPlaylist, width: CGFloat) -> some View {
+        Button {
+            discoveryRoute = .playlistByID(collection)
+        } label: {
             VStack(alignment: .leading, spacing: 7) {
-                HomeArtwork(name: asset)
-                    .frame(width: 154, height: 118)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(.white.opacity(0.16), lineWidth: 1))
-                Text(title).font(.system(size: 14, weight: .bold)).foregroundStyle(.white).lineLimit(1)
-                Text(subtitle).font(.system(size: 11, weight: .medium)).foregroundStyle(MusicXTheme.muted).lineLimit(2)
+                Group {
+                    if let url = collection.artworkURL {
+                        AsyncImage(url: url) { phase in
+                            if let image = phase.image {
+                                image.resizable().scaledToFill()
+                            } else {
+                                MusicArtworkPlaceholder(seed: collection.id, tint: searchTint(for: collection.source))
+                            }
+                        }
+                    } else {
+                        MusicArtworkPlaceholder(seed: collection.id, tint: searchTint(for: collection.source))
+                    }
+                }
+                .frame(width: width, height: width)
+                .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).stroke(.white.opacity(0.16), lineWidth: 0.8))
+
+                Text(collection.name)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+
             }
-            .frame(width: 154, alignment: .leading)
+            .frame(width: width, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
-    private var forYouSection: some View {
-        VStack(alignment: .leading, spacing: 13) {
-            homeSectionTitle("猜你喜欢", action: { recommendationSongs = Array(songs.shuffled().prefix(6)) }, actionTitle: "换一批").padding(.horizontal, 14)
-            ScrollView(.horizontal, showsIndicators: false) {
-                let cardWidth = (UIScreen.main.bounds.width - 52) / 3
-                HStack(spacing: 12) {
-                    ForEach(0..<min(recommendationSongs.count, 6), id: \.self) { index in
-                        let song = recommendationSongs[index]
-                        Button { select(song) } label: {
-                            VStack(alignment: .leading, spacing: 7) {
-                                songArtwork(song.onlineSong, tint: song.tint, size: cardWidth)
-                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                                Text(song.title)
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(.white)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                                    .frame(height: 17, alignment: .topLeading)
-                                Text(song.artist)
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(MusicXTheme.muted)
-                                    .lineLimit(1)
-                            }.frame(width: cardWidth, alignment: .leading)
-                        }.buttonStyle(.plain)
-                    }
-                }.padding(.horizontal, 14)
-            }.frame(height: (UIScreen.main.bounds.width - 52) / 3 + 44)
+    @MainActor
+    private func loadOfficialCollections() async {
+        guard homeOfficialCollections.isEmpty, !isLoadingOfficialCollections else { return }
+        isLoadingOfficialCollections = true
+        officialCollectionsError = nil
+        defer { isLoadingOfficialCollections = false }
+
+        do {
+            let results = try await MusicCatalogSearchEngine().featuredPlaylists(count: 24)
+            guard !Task.isCancelled else { return }
+
+            // Only retain platform-fed collections; keyword search results are not
+            // promoted to "official" home content.
+            let platformCollections = results.filter { collection in
+                guard let provenance = collection.provenance else { return false }
+                return provenance == .officialEditorial
+                    || provenance == .platformRecommended
+                    || provenance == .categoryFeatured
+            }
+            var seen = Set<String>()
+            homeOfficialCollections = Array(
+                platformCollections.filter { seen.insert($0.id).inserted }.prefix(24)
+            )
+            if homeOfficialCollections.isEmpty {
+                officialCollectionsError = "暂时没有可展示的推荐歌单"
+            }
+        } catch {
+            guard !Task.isCancelled else { return }
+            officialCollectionsError = "推荐歌单暂时无法加载"
         }
+    }
+
+    private var chartSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            homeSectionTitle("排行榜", action: nil).padding(.horizontal, 14)
+            GeometryReader { proxy in
+                let gap: CGFloat = 10
+                let horizontalInset: CGFloat = 16
+                let width = max(0, (proxy.size.width - horizontalInset * 2 - gap * 2) / 3)
+                HStack(spacing: gap) {
+                    chartTile("热歌榜", subtitle: "Top 50", rank: "01", icon: "crown.fill", color: Color(red: 0.98, green: 0.48, blue: 0.34), width: width)
+                    chartTile("飙升榜", subtitle: "热度上升", rank: "02", icon: "flame.fill", color: Color(red: 0.60, green: 0.37, blue: 0.98), width: width)
+                    chartTile("新歌榜", subtitle: "最新 50 首", rank: "03", icon: "waveform", color: Color(red: 0.08, green: 0.72, blue: 0.88), width: width)
+                }.padding(.horizontal, horizontalInset)
+            }.frame(height: 104)
+        }
+        // The reference design leaves a distinct breathing space before New Releases.
+        .padding(.bottom, 18)
     }
 
     private func albumArtwork(_ song: MusicSong?, tint: Color, width: CGFloat, height: CGFloat) -> some View {
@@ -601,250 +712,309 @@ struct ContentView: View {
         ScrollViewReader { proxy in
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 24) {
-            pageHeader("搜索", subtitle: "搜索歌曲、歌手或专辑")
-            HStack(spacing: 12) {
-                Image(systemName: "magnifyingglass").foregroundStyle(MusicXTheme.muted)
-                TextField("输入歌曲、歌手或专辑", text: $searchText)
-                    .font(.system(size: 16))
-                    .tint(MusicXTheme.blue)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .focused($searchFieldFocused)
-                if !searchText.isEmpty {
-                    Button { searchText = "" } label: {
-                        Image(systemName: "xmark.circle.fill").foregroundStyle(MusicXTheme.muted)
-                    }
-                }
-            }
-            .padding(.horizontal, 18).frame(height: 58)
-            .background {
-                RoundedRectangle(cornerRadius: 30, style: .continuous).fill(.ultraThinMaterial)
-                    .overlay(RoundedRectangle(cornerRadius: 30).fill(LinearGradient(colors: [Color.white.opacity(0.15), Color(red: 0.10, green: 0.20, blue: 0.42).opacity(0.34)], startPoint: .topLeading, endPoint: .bottomTrailing)))
-                    .overlay(RoundedRectangle(cornerRadius: 30).stroke(LinearGradient(colors: [.white.opacity(0.78), MusicXTheme.blue.opacity(0.52), .white.opacity(0.20)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.15))
-                    .shadow(color: MusicXTheme.blue.opacity(0.30), radius: 16, y: 5)
-            }
-
-            if searchText.isEmpty {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(spacing: 8) {
-                        Text("🔥").font(.system(size: 19))
-                        Text("热门搜索").font(.system(size: 18, weight: .bold))
-                    }
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 9) {
-                            ForEach(Array(searchSuggestions.enumerated()), id: \.element) { index, title in
-                                Button { searchText = title; searchFieldFocused = false } label: {
-                                    Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(.white.opacity(0.96))
-                                        .padding(.horizontal, 15).padding(.vertical, 9)
-                                        .background {
-                                            Capsule().fill(index == 0
-                                                ? LinearGradient(colors: [MusicXTheme.blue.opacity(0.82), Color(red: 0.08, green: 0.25, blue: 0.72).opacity(0.88)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                                                : LinearGradient(colors: [Color.white.opacity(0.16), Color(red: 0.05, green: 0.10, blue: 0.22).opacity(0.62)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                                        }
-                                        .overlay(Capsule().stroke(index == 0 ? MusicXTheme.blue.opacity(0.95) : .white.opacity(0.34), lineWidth: 0.9))
-                                        .shadow(color: index == 0 ? MusicXTheme.blue.opacity(0.62) : .black.opacity(0.18), radius: index == 0 ? 11 : 4, y: 2)
-                                }.buttonStyle(.plain)
+                    pageHeader("搜索", subtitle: "搜索歌曲、歌手或专辑")
+                    HStack(spacing: 12) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 21, weight: .medium))
+                            .foregroundStyle(Color(red: 0.69, green: 0.73, blue: 0.84))
+                        TextField("输入歌曲、歌手或专辑", text: $searchText)
+                            .font(.system(size: 16))
+                            .tint(MusicXTheme.blue)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .focused($searchFieldFocused)
+                        if !searchText.isEmpty {
+                            Button { searchText = "" } label: {
+                                Image(systemName: "xmark.circle.fill").foregroundStyle(MusicXTheme.muted)
                             }
                         }
                     }
-                }.padding(.top, 2)
+                    .padding(.horizontal, 18)
+                    .frame(height: 48)
+                    .background(Color(red: 0.075, green: 0.09, blue: 0.17), in: Capsule())
+                    .overlay(Capsule().stroke(Color(red: 0.19, green: 0.23, blue: 0.43), lineWidth: 1))
+                    .shadow(color: Color(red: 0.16, green: 0.22, blue: 0.55).opacity(0.10), radius: 12, y: 4)
 
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("音乐分类").font(.system(size: 20, weight: .bold))
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                        SearchCategoryCard(title: "华语流行", subtitle: "精选华语流行", asset: "SearchCategory01", symbol: "opticaldisc", tint: Color(red: 0.10, green: 0.48, blue: 0.95)) { searchText = "华语流行" }
-                        SearchCategoryCard(title: "经典老歌", subtitle: "时代金曲回忆", asset: "SearchCategory02", symbol: "mic.fill", tint: Color(red: 0.80, green: 0.22, blue: 0.62)) { searchText = "经典老歌" }
-                        SearchCategoryCard(title: "轻音乐", subtitle: "舒缓 · 放松", asset: "SearchCategory03", symbol: "leaf.fill", tint: Color(red: 0.10, green: 0.58, blue: 0.48)) { searchText = "轻音乐" }
-                        SearchCategoryCard(title: "纯音乐", subtitle: "器乐 · 演奏", asset: "SearchCategory04", symbol: "pianokeys", tint: Color(red: 0.48, green: 0.22, blue: 0.78)) { searchText = "纯音乐" }
-                        SearchCategoryCard(title: "摇滚", subtitle: "激情 · 力量", asset: "SearchCategory05", symbol: "guitars.fill", tint: Color(red: 0.82, green: 0.30, blue: 0.12)) { searchText = "摇滚" }
-                        SearchCategoryCard(title: "欧美音乐", subtitle: "欧美流行精选", asset: "SearchCategory06", symbol: "headphones", tint: Color(red: 0.05, green: 0.58, blue: 0.82)) { searchText = "欧美音乐" }
+                    if searchText.isEmpty {
+                        VStack(alignment: .leading, spacing: 14) {
+                            HStack(spacing: 10) {
+                                Capsule().fill(MusicXTheme.blue).frame(width: 4, height: 20)
+                                Text("热门搜索").font(.system(size: 20, weight: .bold)).foregroundStyle(.white)
+                            }
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 9) {
+                                    ForEach(Array(searchSuggestions.enumerated()), id: \.element) { index, title in
+                                        Button {
+                                            searchText = title
+                                            searchFieldFocused = false
+                                        } label: {
+                                            Text(title)
+                                                .font(.system(size: 14, weight: .medium))
+                                                .foregroundStyle(index == 0 ? Color(red: 0.035, green: 0.055, blue: 0.12) : .white)
+                                                .padding(.horizontal, 17)
+                                                .frame(height: 40)
+                                                .background(index == 0 ? MusicXTheme.blue : Color(red: 0.085, green: 0.105, blue: 0.20), in: Capsule())
+                                                .overlay(Capsule().stroke(index == 0 ? .white.opacity(0.12) : Color(red: 0.16, green: 0.19, blue: 0.34), lineWidth: 1))
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 14) {
+                            HStack(spacing: 10) {
+                                Capsule().fill(MusicXTheme.blue).frame(width: 4, height: 20)
+                                Text("音乐分类").font(.system(size: 20, weight: .bold)).foregroundStyle(.white)
+                            }
+                            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                                SearchCategoryCard(title: "华语流行", subtitle: "精选华语流行", asset: "SearchCategory01", symbol: "circle.fill", tint: Color(red: 0.10, green: 0.43, blue: 0.88)) { discoveryRoute = .musicCategory(title: "华语流行", subtitle: "精选华语流行", artwork: "category_chinese_pop", keyword: "华语流行") }
+                                SearchCategoryCard(title: "经典老歌", subtitle: "时代金曲回忆", asset: "SearchCategory02", symbol: "mic.fill", tint: Color(red: 0.73, green: 0.20, blue: 0.53)) { discoveryRoute = .musicCategory(title: "经典老歌", subtitle: "时代金曲回忆", artwork: "category_classic", keyword: "经典老歌") }
+                                SearchCategoryCard(title: "轻音乐", subtitle: "舒缓 · 放松", asset: "SearchCategory03", symbol: "leaf.fill", tint: Color(red: 0.08, green: 0.55, blue: 0.43)) { discoveryRoute = .musicCategory(title: "轻音乐", subtitle: "舒缓 · 放松", artwork: "category_light", keyword: "轻音乐") }
+                                SearchCategoryCard(title: "纯音乐", subtitle: "器乐 · 演奏", asset: "SearchCategory04", symbol: "square.fill", tint: Color(red: 0.48, green: 0.23, blue: 0.80)) { discoveryRoute = .musicCategory(title: "纯音乐", subtitle: "器乐 · 演奏", artwork: "category_instrumental", keyword: "纯音乐") }
+                                SearchCategoryCard(title: "摇滚", subtitle: "激情 · 力量", asset: "SearchCategory05", symbol: "bolt.fill", tint: Color(red: 0.82, green: 0.30, blue: 0.10)) { discoveryRoute = .musicCategory(title: "摇滚", subtitle: "激情 · 力量", artwork: "category_rock", keyword: "摇滚") }
+                                SearchCategoryCard(title: "欧美音乐", subtitle: "欧美流行精选", asset: "SearchCategory06", symbol: "headphones", tint: Color(red: 0.05, green: 0.52, blue: 0.75)) { discoveryRoute = .musicCategory(title: "欧美音乐", subtitle: "欧美流行精选", artwork: "category_singers", keyword: "欧美音乐") }
+                            }
+                        }
+                        Text("选择分类，发现更多音乐")
+                            .font(.system(size: 14))
+                            .foregroundStyle(MusicXTheme.muted)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 1)
+                    } else {
+                        HStack {
+                            Text("搜索结果").font(.system(size: 19, weight: .bold)).id("searchResults")
+                            Spacer()
+                            Text(isSearching ? "搜索中…" : "\(filteredSongs.count) 首")
+                                .font(.system(size: 13)).foregroundStyle(MusicXTheme.muted)
+                        }
+                        if filteredSongs.isEmpty {
+                            emptyState(icon: "music.note.list", title: searchError == nil ? "正在搜索在线音源" : "暂时没有搜索结果", detail: searchError ?? "请稍候")
+                        } else {
+                            VStack(spacing: 17) {
+                                ForEach(filteredSongs) { song in songRow(song, startsSearchQueue: true) }
+                            }
+                        }
                     }
+                    Spacer(minLength: 0)
                 }
-                Text("选择分类，发现更多音乐").font(.system(size: 13)).foregroundStyle(MusicXTheme.muted).padding(.top, 1)
-            } else {
-                HStack {
-                    Text("搜索结果").font(.system(size: 19, weight: .bold))
-                        .id("searchResults")
-                    Spacer()
-                    Text(isSearching ? "搜索中…" : "\(filteredSongs.count) 首").font(.system(size: 13)).foregroundStyle(MusicXTheme.muted)
-                }
-                if filteredSongs.isEmpty {
-                    emptyState(icon: "music.note.list", title: searchError == nil ? "正在搜索在线音源" : "暂时没有搜索结果", detail: searchError ?? "请稍候")
-                } else {
-                    VStack(spacing: 17) {
-                        ForEach(filteredSongs) { song in songRow(song, startsSearchQueue: true) }
-                    }
-                }
-            }
-            Spacer(minLength: 0)
-        }
-                .padding(.horizontal, 22).padding(.top, 28)
+                .padding(.horizontal, 16)
+                .padding(.top, 70)
+                .padding(.bottom, 24)
             }
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: searchFieldFocused) { _, focused in
                 guard focused else { return }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo("searchResults", anchor: .top)
-                    }
+                    withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("searchResults", anchor: .top) }
                 }
             }
             .task(id: searchText) {
-            let keyword = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !keyword.isEmpty else { onlineResults = []; searchError = nil; return }
-            try? await Task.sleep(for: .milliseconds(450))
-            guard !Task.isCancelled else { return }
+                let keyword = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !keyword.isEmpty else { onlineResults = []; searchError = nil; return }
+                try? await Task.sleep(for: .milliseconds(450))
+                guard !Task.isCancelled else { return }
                 await searchOnline(keyword)
             }
         }
     }
 
     private var libraryPage: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("音乐库")
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                    Text("属于你的音乐空间")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(MusicXTheme.muted)
-                }
-                Spacer()
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 22, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .frame(width: 44, height: 44)
-                    .background(.white.opacity(0.07), in: Circle())
-                    .overlay(Circle().stroke(.white.opacity(0.12), lineWidth: 1))
-                    .contentShape(Circle())
-                    .onTapGesture { selectedTab = .search; searchFieldFocused = true }
-            }
-
-            HStack(spacing: 8) {
-                libraryQuickCard("我喜欢", detail: "\(favoriteSongs.count) 首", symbol: "heart.fill",
-                                 colors: [Color(red: 0.78, green: 0.20, blue: 0.48), Color(red: 0.34, green: 0.10, blue: 0.30)]) {
-                    libraryContentType = .songs; libraryFilter = .favorites
-                }
-                libraryQuickCard("本地音乐", detail: downloadedSongs.isEmpty ? "未接入" : "\(downloadedSongs.count) 首", symbol: "arrow.down.to.line",
-                                 colors: [Color(red: 0.12, green: 0.48, blue: 0.78), Color(red: 0.08, green: 0.22, blue: 0.48)]) {
-                    libraryContentType = .songs; libraryFilter = .recent
-                }
-                libraryQuickCard("最近播放", detail: "\(recentSongs.count) 首", symbol: "clock.fill",
-                                 colors: [Color(red: 0.48, green: 0.28, blue: 0.80), Color(red: 0.22, green: 0.12, blue: 0.48)]) {
-                    libraryContentType = .songs; libraryFilter = .recent
-                }
-                libraryQuickCard("我的歌单", detail: "0 个", symbol: "list.bullet",
-                                 colors: [Color(red: 0.76, green: 0.34, blue: 0.16), Color(red: 0.38, green: 0.16, blue: 0.12)]) {
-                    libraryContentType = .playlists
-                }
-            }
-            .frame(height: 94)
-
-            HStack(spacing: 8) {
-                ForEach(LibraryContentType.allCases, id: \.self) { type in
-                    Button { libraryContentType = type } label: {
-                        Text(type.rawValue)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(libraryContentType == type ? .white : MusicXTheme.muted)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(libraryContentType == type ? MusicXTheme.blue.opacity(0.25) : Color.white.opacity(0.045), in: Capsule())
-                            .overlay(Capsule().stroke(libraryContentType == type ? MusicXTheme.blue.opacity(0.62) : .white.opacity(0.08), lineWidth: 1))
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(alignment: .center) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("音乐库")
+                            .font(.system(size: 34, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                        Text("最近听过的音乐与喜欢的歌曲")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(MusicXTheme.muted)
+                    }
+                    Spacer()
+                    Button {
+                        selectedTab = .search
+                        searchFieldFocused = true
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 21, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.92))
+                            .frame(width: 44, height: 44)
+                            .background(Color(red: 0.075, green: 0.09, blue: 0.17), in: Circle())
+                            .overlay(Circle().stroke(Color(red: 0.19, green: 0.23, blue: 0.43), lineWidth: 1))
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("搜索音乐")
                 }
-            }
 
-            HStack {
-                Button {
-                    if let first = librarySongs.first { select(first) }
-                } label: {
-                    Label("播放全部", systemImage: "play.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(MusicXTheme.background)
-                        .padding(.horizontal, 20).padding(.vertical, 12)
-                        .background(Color.white, in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .disabled(librarySongs.isEmpty || libraryContentType != .songs)
-                Spacer()
-                Text("\(libraryContentType == .songs ? librarySongs.count : libraryContentType == .artists ? libraryArtists.count : 0) 首")
-                    .font(.system(size: 13, weight: .medium)).foregroundStyle(MusicXTheme.muted)
-            }
-
-            if libraryContentType == .songs {
-                if librarySongs.isEmpty {
-                    Spacer()
-                    emptyState(icon: libraryFilter == .favorites ? "heart" : "clock.arrow.circlepath",
-                               title: libraryFilter == .favorites ? "还没有收藏歌曲" : "暂无最近播放",
-                               detail: libraryFilter == .favorites ? "在播放列表中点亮爱心，收藏的歌曲会显示在这里" : "播放过的歌曲会自动保存在这里")
-                    Spacer()
-                } else {
-                    ScrollView(showsIndicators: false) {
-                        VStack(spacing: 16) {
-                            ForEach(librarySongs) { song in songRow(song) }
+                HStack(spacing: 8) {
+                    ForEach([LibraryContentType.songs, .artists], id: \.self) { type in
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.18)) { libraryContentType = type }
+                        } label: {
+                            Text(type.rawValue)
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(libraryContentType == type ? Color(red: 0.035, green: 0.045, blue: 0.11) : .white.opacity(0.88))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 44)
+                                .background(libraryContentType == type ? MusicXTheme.blue : Color(red: 0.085, green: 0.105, blue: 0.20), in: Capsule())
+                                .overlay(Capsule().stroke(libraryContentType == type ? .white.opacity(0.14) : Color(red: 0.16, green: 0.19, blue: 0.34), lineWidth: 1))
                         }
-                        .padding(.top, 4)
-                        .padding(.bottom, 24)
+                        .buttonStyle(.plain)
                     }
                 }
-            } else if libraryContentType == .artists {
-                if libraryArtists.isEmpty {
-                    Spacer()
-                    emptyState(icon: "person.2", title: "暂无歌手", detail: "最近播放或收藏歌曲后，歌手会自动整理在这里")
-                    Spacer()
+
+                if libraryContentType == .songs {
+                    HStack(spacing: 9) {
+                        ForEach(LibraryFilter.allCases, id: \.self) { filter in
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.18)) { libraryFilter = filter }
+                            } label: {
+                                Text(filter.rawValue)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(libraryFilter == filter ? MusicXTheme.blue.opacity(0.98) : .white.opacity(0.88))
+                                    .padding(.horizontal, 15)
+                                    .frame(height: 38)
+                                    .background(libraryFilter == filter ? Color(red: 0.10, green: 0.15, blue: 0.29) : Color(red: 0.085, green: 0.105, blue: 0.20), in: Capsule())
+                                    .overlay(Capsule().stroke(libraryFilter == filter ? MusicXTheme.blue : Color(red: 0.16, green: 0.19, blue: 0.34), lineWidth: 1))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        Spacer()
+                        Text("\(librarySongs.count) 首")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(MusicXTheme.muted)
+                    }
+                    .padding(.top, 2)
+
+                    if librarySongs.isEmpty {
+                        emptyState(
+                            icon: libraryFilter == .favorites ? "heart" : "clock.arrow.circlepath",
+                            title: libraryFilter == .favorites ? "还没有收藏歌曲" : "暂无最近播放",
+                            detail: libraryFilter == .favorites ? "在歌曲列表中点亮爱心，收藏的歌曲会显示在这里" : "播放过的歌曲会自动保存在这里"
+                        )
+                        .frame(maxWidth: .infinity, minHeight: 300)
+                    } else {
+                        VStack(spacing: 3) {
+                            ForEach(librarySongs) { song in
+                                HStack(spacing: 12) {
+                                    songArtwork(song.onlineSong, tint: song.tint, size: 48)
+                                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    Button { selectManually(song) } label: {
+                                        VStack(alignment: .leading, spacing: 5) {
+                                            Text(song.title)
+                                                .font(.system(size: 15, weight: .semibold))
+                                                .foregroundStyle(currentSong?.id == song.id ? MusicXTheme.blue : .white)
+                                                .lineLimit(1)
+                                            Text(song.artist)
+                                                .font(.system(size: 12))
+                                                .foregroundStyle(MusicXTheme.muted)
+                                                .lineLimit(1)
+                                        }
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    Button { toggleFavorite(song) } label: {
+                                        Image(systemName: favorites.contains(song.id) ? "heart.fill" : "heart")
+                                            .font(.system(size: 19, weight: .medium))
+                                            .foregroundStyle(favorites.contains(song.id) ? MusicXTheme.blue : MusicXTheme.muted)
+                                            .frame(width: 30, height: 48)
+                                    }
+                                    .buttonStyle(.plain)
+                                    Button { selectManually(song) } label: {
+                                        Image(systemName: currentSong?.id == song.id && playerStore.isPlaying ? "pause.circle" : "play.circle")
+                                            .font(.system(size: 25, weight: .regular))
+                                            .foregroundStyle(.white.opacity(0.92))
+                                            .frame(width: 34, height: 48)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .background(currentSong?.id == song.id ? Color(red: 0.10, green: 0.15, blue: 0.29) : Color.white.opacity(0.012), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                                .overlay(alignment: .bottom) {
+                                    if currentSong?.id != song.id {
+                                        Rectangle().fill(.white.opacity(0.08)).frame(height: 0.5).padding(.leading, 10)
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.top, 2)
+                        .padding(.bottom, 24)
+                    }
                 } else {
-                    ScrollView(showsIndicators: false) {
-                        VStack(spacing: 14) {
+                    HStack {
+                        Text("歌手")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white)
+                        Spacer()
+                        Text("\(libraryArtists.count) 位")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(MusicXTheme.muted)
+                    }
+                    if libraryArtists.isEmpty {
+                        emptyState(icon: "person.2", title: "暂无歌手", detail: "最近播放或收藏歌曲后，歌手会自动整理在这里")
+                            .frame(maxWidth: .infinity, minHeight: 300)
+                    } else {
+                        VStack(spacing: 3) {
                             ForEach(libraryArtists) { item in
                                 Button {
                                     searchText = item.artist
                                     selectedTab = .search
                                 } label: {
                                     HStack(spacing: 14) {
-                                        songArtwork(item.song.onlineSong, tint: item.song.tint, size: 58)
+                                        songArtwork(item.song.onlineSong, tint: item.song.tint, size: 48)
                                             .clipShape(Circle())
                                         VStack(alignment: .leading, spacing: 5) {
-                                            Text(item.artist).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white)
+                                            Text(item.artist).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
                                             Text("\(item.count) 首歌曲").font(.system(size: 12)).foregroundStyle(MusicXTheme.muted)
                                         }
                                         Spacer()
                                         Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(MusicXTheme.muted)
                                     }
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 8)
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
                             }
                         }
-                        .padding(.top, 4)
-                        .padding(.bottom, 24)
                     }
                 }
-            } else {
-                Spacer()
-                emptyState(icon: libraryContentType == .playlists ? "music.note.list" : "square.stack",
-                           title: libraryContentType == .playlists ? "暂无歌单" : "暂无专辑",
-                           detail: "添加或收藏内容后，会整理显示在这里")
-                Spacer()
             }
-            Spacer(minLength: 0)
+            .padding(.horizontal, 16)
+            .padding(.top, 0)
+            .padding(.bottom, 20)
         }
-        .padding(.horizontal, 22).padding(.top, 28)
     }
 
-    private func libraryQuickCard(_ title: String, detail: String, symbol: String, colors: [Color], action: @escaping () -> Void) -> some View {
+    private func libraryShortcutCard(
+        title: String,
+        count: String,
+        symbol: String,
+        colors: [Color],
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 7) {
-                Image(systemName: symbol).font(.system(size: 21, weight: .semibold)).frame(maxWidth: .infinity)
-                Spacer(minLength: 0)
-                Text(title).font(.system(size: 12, weight: .bold)).lineLimit(1)
-                Text(detail).font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.82)).lineLimit(1)
+            VStack(alignment: .leading, spacing: 9) {
+                Image(systemName: symbol)
+                    .font(.system(size: 21, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                    Text(count).font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.82))
+                        .lineLimit(1).minimumScaleFactor(0.75)
+                }
             }
-            .foregroundStyle(.white)
-            .padding(9)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-            .background(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(.white.opacity(0.28), lineWidth: 1))
+            .frame(maxWidth: .infinity)
+            .frame(height: 94)
+            .padding(.horizontal, 6)
+            .background(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing),
+                in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 17, style: .continuous).stroke(.white.opacity(0.25), lineWidth: 1))
         }
         .buttonStyle(.plain)
     }
@@ -878,7 +1048,7 @@ struct ContentView: View {
         if let action {
             Button(action: action) {
                 HStack(spacing: 10) {
-                    Capsule().fill(MusicXTheme.blue).frame(width: 4, height: 21)
+                    Capsule().fill(MusicXTheme.blue).frame(width: 3, height: 21)
                     Text(title).font(.system(size: 20, weight: .bold)).foregroundStyle(.white)
                     Spacer()
                     Text(actionTitle).font(.system(size: 12, weight: .medium)).foregroundStyle(MusicXTheme.muted)
@@ -889,7 +1059,7 @@ struct ContentView: View {
             .buttonStyle(.plain)
         } else {
             HStack(spacing: 10) {
-                Capsule().fill(MusicXTheme.blue).frame(width: 4, height: 21)
+                Capsule().fill(MusicXTheme.blue).frame(width: 3, height: 21)
                 Text(title).font(.system(size: 20, weight: .bold)).foregroundStyle(.white)
                 Spacer()
             }
@@ -898,20 +1068,16 @@ struct ContentView: View {
     }
 
     private func homeSongRow(_ song: AppSong, artworkName: String? = nil) -> some View {
-        Button { select(song) } label: {
+        Button { selectManually(song) } label: {
             HStack(spacing: 12) {
-                Group {
-                    if let artworkName { HomeArtwork(name: artworkName) }
-                    else { songArtwork(song.onlineSong, tint: song.tint, size: 46) }
-                }
-                .frame(width: 46, height: 46)
-                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-                VStack(alignment: .leading, spacing: 4) {
+                songArtwork(song.onlineSong, tint: song.tint, size: 44)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                VStack(alignment: .leading, spacing: 3) {
                     Text(song.title).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
                     Text(song.artist).font(.system(size: 12)).foregroundStyle(MusicXTheme.muted).lineLimit(1)
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 if let duration = song.onlineSong?.duration, duration > 0 {
-                    Text(playerTime(duration)).font(.system(size: 12, weight: .regular, design: .rounded)).monospacedDigit().foregroundStyle(MusicXTheme.muted)
+                    Text(playerTime(duration)).font(.system(size: 12, weight: .medium, design: .rounded)).monospacedDigit().foregroundStyle(MusicXTheme.muted)
                 }
             }.contentShape(Rectangle()).padding(.vertical, 7)
         }.buttonStyle(.plain)
@@ -932,11 +1098,9 @@ struct ContentView: View {
 
     private func songRow(_ song: AppSong, number: String? = nil, startsSearchQueue: Bool = false) -> some View {
         HStack(spacing: 13) {
-            RoundedRectangle(cornerRadius: 12)
-                .fill(LinearGradient(colors: [song.tint, song.tint.opacity(0.45)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                .frame(width: 54, height: 54)
-                .overlay(Image(systemName: "music.note").font(.system(size: 20)).foregroundStyle(.white.opacity(0.8)))
-            Button { startsSearchQueue ? playSearchResult(song) : select(song) } label: {
+            songArtwork(song.onlineSong, tint: song.tint, size: 54)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            Button { startsSearchQueue ? playSearchResult(song) : selectManually(song) } label: {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(song.title).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
                     HStack(spacing: 6) {
@@ -953,7 +1117,7 @@ struct ContentView: View {
                 Image(systemName: favorites.contains(song.id) ? "heart.fill" : "heart")
                     .font(.system(size: 17)).foregroundStyle(favorites.contains(song.id) ? MusicXTheme.blue : MusicXTheme.muted)
             }
-            Button { startsSearchQueue ? playSearchResult(song) : select(song) } label: {
+            Button { startsSearchQueue ? playSearchResult(song) : selectManually(song) } label: {
                 Image(systemName: currentSong?.id == song.id && playerStore.isPlaying ? "pause.circle.fill" : "play.circle")
                     .font(.system(size: 25)).foregroundStyle(.white.opacity(0.85))
             }
@@ -978,70 +1142,100 @@ struct ContentView: View {
         }.buttonStyle(.plain)
     }
 
-    private func chartTile(_ title: String, subtitle: String, rank: String, color: Color, width: CGFloat) -> some View {
-        Button { discoveryRoute = .chart(title) } label: {
+    private func chartTile(_ title: String, subtitle: String, rank: String, icon: String, color: Color, width: CGFloat) -> some View {
+        return Button { discoveryRoute = .chart(title) } label: {
             ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(LinearGradient(colors: [color.opacity(0.90), Color(red: 0.10, green: 0.11, blue: 0.23)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                RadialGradient(colors: [color.opacity(0.88), .clear], center: .init(x: 0.72, y: 0.25), startRadius: 2, endRadius: 100)
-                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(rank).font(.system(size: 27, weight: .regular)).foregroundStyle(.white)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            stops: [
+                                .init(color: Color(red: 0.12, green: 0.13, blue: 0.23), location: 0.0),
+                                .init(color: Color(red: 0.075, green: 0.09, blue: 0.17), location: 0.62),
+                                .init(color: Color(red: 0.035, green: 0.05, blue: 0.11), location: 1.0)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                RadialGradient(
+                    colors: [color.opacity(0.88), color.opacity(0.36), .clear],
+                    center: UnitPoint(x: 0.82, y: 0.18),
+                    startRadius: 1,
+                    endRadius: width * 0.82
+                )
+                LinearGradient(
+                    colors: [.clear, Color(red: 0.025, green: 0.035, blue: 0.085).opacity(0.78)],
+                    startPoint: .center,
+                    endPoint: .bottom
+                )
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(rank).font(.system(size: 27, weight: .medium, design: .rounded)).foregroundStyle(.white)
                     Spacer(minLength: 0)
-                    Text(title).font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
-                    Text(subtitle).font(.system(size: 12)).foregroundStyle(.white.opacity(0.88)).padding(.top, 4)
-                }.padding(.leading, 13).padding(.vertical, 12)
+                    Text(title).font(.system(size: 15, weight: .bold)).foregroundStyle(.white).lineLimit(1)
+                    Text(subtitle).font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.82)).lineLimit(1).minimumScaleFactor(0.72)
+                }.padding(12)
             }
-            .frame(width: width, height: 107)
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(.white.opacity(0.26), lineWidth: 1))
+            .frame(width: width, height: 104)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(color.opacity(0.48), lineWidth: 0.9))
+            .shadow(color: color.opacity(0.16), radius: 10, y: 4)
         }.buttonStyle(.plain)
     }
 
     private var miniPlayer: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 10) {
             Button { if currentSong != nil { isPlayerPresented = true } } label: {
-                HStack(spacing: 12) {
+                HStack(spacing: 10) {
                     Group {
                         if currentSong == nil {
-                            HomeArtwork(name: "player_cover").frame(width: 42, height: 42)
+                            HomeArtwork(name: "player_cover").frame(width: 40, height: 40)
+                                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
                         } else {
-                            songArtwork(currentSong?.onlineSong, tint: currentSong?.tint ?? MusicXTheme.blue, size: 42)
+                            songArtwork(currentSong?.onlineSong, tint: currentSong?.tint ?? MusicXTheme.blue, size: 40)
                         }
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(currentSong?.title ?? "尚未播放").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
-                        Text(currentSong?.artist ?? "选择一首歌曲开始聆听").font(.system(size: 12)).foregroundStyle(.white.opacity(0.72)).lineLimit(1)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(currentSong?.title ?? "尚未播放")
+                            .font(.system(size: 14, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
+                        Text(currentSong?.artist ?? "选择一首歌曲开始聆听")
+                            .font(.system(size: 11)).foregroundStyle(.white.opacity(0.72)).lineLimit(1)
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
             }.buttonStyle(.plain)
+            Button { stepSong(by: -1) } label: {
+                Image(systemName: "backward.end.fill").font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.92)).frame(width: 30, height: 46)
+            }.buttonStyle(.plain).disabled(playbackQueue.isEmpty)
             Button { if currentSong != nil { playerStore.togglePlayback() } } label: {
                 Group {
-                    if isResolvingSong || playerStore.isBuffering { ProgressView().tint(MusicXTheme.background) }
-                    else { Image(systemName: playerStore.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 20, weight: .bold)).foregroundStyle(MusicXTheme.background) }
+                    if isResolvingSong || playerStore.isBuffering { ProgressView().tint(.white) }
+                    else { Image(systemName: playerStore.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 19, weight: .bold)).foregroundStyle(.white) }
                 }
-                .frame(width: 58, height: 58)
-                .background(.white, in: Circle())
+                .frame(width: 44, height: 44)
+                .background(.white.opacity(0.22), in: Circle())
+                .overlay(Circle().stroke(.white.opacity(0.30), lineWidth: 1))
             }.buttonStyle(.plain).disabled(currentSong == nil)
             Button { stepSong(by: 1) } label: {
-                Image(systemName: "forward.end.fill").font(.system(size: 19, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.92)).frame(width: 34, height: 48)
+                Image(systemName: "forward.end.fill").font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.92)).frame(width: 30, height: 46)
             }.buttonStyle(.plain).disabled(playbackQueue.isEmpty)
         }
         .padding(.horizontal, 14)
-        .frame(height: 78)
+        .frame(height: 68)
         .background {
-            RoundedRectangle(cornerRadius: 25, style: .continuous).fill(.ultraThinMaterial)
-                .overlay(RoundedRectangle(cornerRadius: 25, style: .continuous)
-                    .fill(Color(red: 0.19, green: 0.23, blue: 0.43).opacity(0.78)))
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(Color(red: 0.10, green: 0.12, blue: 0.27).opacity(0.72))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(LinearGradient(colors: [Color(red: 0.40, green: 0.31, blue: 0.66).opacity(0.34), Color(red: 0.08, green: 0.11, blue: 0.25).opacity(0.12)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                }
         }
-        .overlay(RoundedRectangle(cornerRadius: 25, style: .continuous).stroke(.white.opacity(0.18), lineWidth: 1))
-        .shadow(color: .black.opacity(0.22), radius: 16, y: 5)
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(.white.opacity(0.30), lineWidth: 1))
+        .shadow(color: Color.black.opacity(0.30), radius: 16, y: 7)
         .padding(.horizontal, 12)
     }
 
-    private var progressFraction: CGFloat {
+        private var progressFraction: CGFloat {
         guard playerStore.duration > 0 else { return 0 }
         return CGFloat(min(max(playerStore.currentTime / playerStore.duration, 0), 1))
     }
@@ -1063,48 +1257,17 @@ struct ContentView: View {
                                 .font(.system(size: 19, weight: .semibold))
                         }
                         Spacer()
-                        Text("正在播放").font(.system(size: 16, weight: .semibold))
+                        Text("正在播放").font(.system(size: 18, weight: .semibold))
                         Spacer()
                         Menu {
-                            Button {
-                                if let currentSong { toggleFavorite(currentSong) }
-                            } label: {
-                                Label(favorites.contains(currentSong?.id ?? -1) ? "取消喜欢" : "添加到喜欢",
-                                      systemImage: favorites.contains(currentSong?.id ?? -1) ? "heart.slash" : "heart")
-                            }
-                            ShareLink(item: "\(currentSong?.title ?? "歌曲") - \(currentSong?.artist ?? "未知歌手")") {
-                                Label("分享歌曲", systemImage: "square.and.arrow.up")
-                            }
-                            ShareLink(item: MusicSourceDiagnostics.shared.fileURL) {
-                                Label("分享音源诊断", systemImage: "waveform.path")
-                            }
-                            Button {
-                                downloadCurrentSong()
-                            } label: {
-                                Label(isDownloading ? "正在下载…" : (isCurrentSongDownloaded ? "已下载" : "下载歌曲"),
-                                      systemImage: "arrow.down.to.line")
-                            }
-                            .disabled(currentSong?.onlineSong == nil || isDownloading || isCurrentSongDownloaded)
-                            Menu {
-                                Button("查看专辑") {
-                                    if let song = currentSong?.onlineSong {
-                                        isPlayerPresented = false
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { discoveryRoute = .album(title: song.album?.isEmpty == false ? song.album! : song.title, artist: song.artist) }
-                                    }
-                                }
-                                Button("查看歌手") {
-                                    if let artist = currentSong?.artist, !artist.isEmpty {
-                                        isPlayerPresented = false
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { openSearch(query: artist) }
-                                    }
-                                }
-                            } label: {
-                                Label("查看专辑 / 歌手", systemImage: "person.crop.rectangle")
-                            }
+                            Button("播放队列", systemImage: "list.bullet") { playerDisplayMode = .queue }
+                            Button("歌词", systemImage: "quote.bubble") { playerDisplayMode = .lyrics }
+                            Button("封面", systemImage: "square") { playerDisplayMode = .artwork }
                         } label: {
-                            Image(systemName: "ellipsis").font(.system(size: 19, weight: .semibold))
+                            Image(systemName: "ellipsis")
+                                .font(.system(size: 20, weight: .semibold))
+                                .frame(width: 28, height: 28)
                         }
-                        .disabled(currentSong == nil)
                     }
                     .foregroundStyle(.white)
                     .padding(.horizontal, 26)
@@ -1128,14 +1291,6 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding(.horizontal, 18)
                     .contentShape(Rectangle())
-                    .simultaneousGesture(DragGesture(minimumDistance: 30).onEnded { value in
-                        let horizontal = value.translation.width
-                        let vertical = value.translation.height
-                        guard abs(horizontal) > 55, abs(horizontal) > abs(vertical) * 1.2 else { return }
-                        withAnimation(.easeInOut(duration: 0.22)) {
-                            playerDisplayMode = horizontal < 0 ? playerDisplayMode.next : playerDisplayMode.previous
-                        }
-                    })
 
                     // Fixed lower controls: track information, timeline and transport.
                     HStack(alignment: .center, spacing: 14) {
@@ -1236,23 +1391,31 @@ struct ContentView: View {
                     .padding(.top, 10)
 
                     HStack {
-                        Button { isShuffleEnabled.toggle() } label: {
+                        Button {
+                            isShuffleEnabled.toggle()
+                            resetShuffleHistory()
+                        } label: {
                             Image(systemName: "shuffle")
                                 .foregroundStyle(isShuffleEnabled ? MusicXTheme.blue : .white.opacity(0.65))
                         }
                         Spacer()
-                        HStack(spacing: 10) {
+                        HStack(spacing: 30) {
                             ForEach(PlayerDisplayMode.allCases, id: \.self) { mode in
                                 Button {
                                     withAnimation(.easeInOut(duration: 0.22)) {
                                         playerDisplayMode = mode
                                     }
                                 } label: {
-                                    Capsule()
-                                        .fill(playerDisplayMode == mode ? MusicXTheme.blue : .white.opacity(0.30))
-                                        .frame(width: playerDisplayMode == mode ? 16 : 5, height: 5)
-                                        .frame(width: 20, height: 30)
-                                        .contentShape(Rectangle())
+                                    VStack(spacing: 11) {
+                                        Text(mode.title)
+                                            .font(.system(size: 15, weight: playerDisplayMode == mode ? .semibold : .medium))
+                                            .foregroundStyle(playerDisplayMode == mode ? .white : MusicXTheme.muted)
+                                        Rectangle()
+                                            .fill(playerDisplayMode == mode ? MusicXTheme.blue : .clear)
+                                            .frame(width: 60, height: 2.5)
+                                    }
+                                    .frame(minWidth: 48)
+                                    .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
                                 .accessibilityLabel(mode.title)
@@ -1271,22 +1434,32 @@ struct ContentView: View {
                     .padding(.bottom, 8)
                 }
                 .frame(width: geometry.size.width, height: geometry.size.height, alignment: .center)
-                .simultaneousGesture(DragGesture(minimumDistance: 45).onEnded { value in
-                    if value.translation.height > 95 && abs(value.translation.width) < 85 {
+                .simultaneousGesture(DragGesture(minimumDistance: 24, coordinateSpace: .global).onEnded { value in
+                    let horizontal = value.translation.width
+                    let vertical = value.translation.height
+                    if value.startLocation.y <= 120,
+                       vertical > 110,
+                       vertical > abs(horizontal) * 1.25 {
                         withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
                             isPlayerPresented = false
                         }
+                        return
+                    }
+                    guard value.startLocation.x <= 28,
+                          horizontal > 80,
+                          horizontal > abs(vertical) * 1.25 else { return }
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                        isPlayerPresented = false
                     }
                 })
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .center)
             .background {
                 playerArtwork
-                    .frame(width: geometry.size.width, height: geometry.size.height)
-                    .clipped()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .blur(radius: 65)
-                    .overlay(MusicXTheme.background.opacity(0.78))
+                    .overlay(MusicXTheme.background.opacity(0.56))
+                    .ignoresSafeArea()
             }
-            .clipped()
         }
         .preferredColorScheme(.dark)
         .task(id: currentSong?.id) { await loadPlayerMetadata() }
@@ -1358,7 +1531,7 @@ struct ContentView: View {
                         ForEach(playbackQueue) { song in
                             let active = song.id == currentSong?.id
                             HStack(spacing: 8) {
-                                Button { select(song) } label: {
+                                Button { selectManually(song) } label: {
                                     HStack(spacing: 12) {
                                         songArtwork(song.onlineSong, tint: song.tint, size: 42)
                                         VStack(alignment: .leading, spacing: 4) {
@@ -1495,28 +1668,89 @@ struct ContentView: View {
 
     private func stepSong(by offset: Int) {
         let queue = playbackQueue
-        guard !queue.isEmpty else { return }
+        guard !queue.isEmpty, offset == -1 || offset == 1 else { return }
         let index = queue.firstIndex(where: { $0.id == currentSong?.id }) ?? 0
         if isShuffleEnabled && queue.count > 1 {
-            let candidates = queue.filter { $0.id != currentSong?.id }
-            if let next = candidates.randomElement() { select(next) }
+            if offset < 0 {
+                guard let previousID = shuffleHistory.popLast(),
+                      let previous = queue.first(where: { $0.id == previousID }),
+                      let currentSong else { return }
+                shuffleForwardHistory.insert(currentSong.id, at: 0)
+                select(previous)
+            } else if !shuffleForwardHistory.isEmpty {
+                guard let nextID = shuffleForwardHistory.first,
+                      let next = queue.first(where: { $0.id == nextID }),
+                      let currentSong else { return }
+                shuffleForwardHistory.removeFirst()
+                shuffleHistory.append(currentSong.id)
+                select(next)
+            } else {
+                selectRandomNextTrack(from: queue)
+            }
             return
         }
-        select(queue[(index + offset + queue.count) % queue.count])
+
+        let nextIndex = index + offset
+        if queue.indices.contains(nextIndex) {
+            select(queue[nextIndex])
+        } else if repeatMode == 1 {
+            select(offset > 0 ? queue[0] : queue[queue.count - 1])
+        }
     }
 
-    /// A resolved stream URL can expire before playback starts. Invalidate the cached
-    /// URL and resolve the same track once before giving up and advancing the queue.
+    private func selectRandomNextTrack(from queue: [AppSong]) {
+        guard let currentSong else { return }
+        let candidates = queue.filter { $0.id != currentSong.id }
+        guard let next = candidates.randomElement() else { return }
+        shuffleHistory.append(currentSong.id)
+        shuffleForwardHistory.removeAll()
+        select(next)
+    }
+
+    /// Resolve the next two queue entries in the background so their URLs are
+    /// already cached when the user skips. Prefetch never blocks the active track.
+    private func prefetchUpcomingTracks(after song: AppSong) {
+        playbackPrefetchTask?.cancel()
+        guard !isShuffleEnabled else { return }
+        let queue = playbackQueue
+        guard let index = queue.firstIndex(where: { $0.id == song.id }) else { return }
+        let upcoming = Array(queue.dropFirst(index + 1).prefix(2)).compactMap(\.onlineSong)
+        guard !upcoming.isEmpty else { return }
+        let quality = selectedMusicQuality
+        playbackPrefetchTask = Task {
+            let resolver = LXMusicURLResolver()
+            for nextSong in upcoming {
+                guard !Task.isCancelled else { return }
+                _ = try? await resolver.resolve(song: nextSong, quality: quality)
+            }
+        }
+    }
+
+    /// If AVPlayer rejects a resolved stream, invalidate it and continue through
+    /// providers not yet tried for this track before advancing the queue.
     private func retryCurrentSongWithFreshURL() {
-        guard let song = currentSong, let onlineSong = song.onlineSong,
-              !refreshedPlaybackSongIDs.contains(song.id) else {
+        guard let song = currentSong, let onlineSong = song.onlineSong else {
             advanceAfterPlaybackFailure()
             return
         }
-        refreshedPlaybackSongIDs.insert(song.id)
+        let retryCount = playbackRetryCounts[song.id, default: 0]
+        // Four providers are registered in the resource engine, so allow up to
+        // three same-track retries after the initial provider has failed.
+        guard retryCount < 3 else {
+            advanceAfterPlaybackFailure()
+            return
+        }
+        playbackRetryCounts[song.id] = retryCount + 1
         playbackTask?.cancel()
         playbackRequestID = UUID()
         let requestID = playbackRequestID
+        let retryStartedAt = Date()
+        let retryDiagnosticID = requestID.uuidString
+        MusicSourceDiagnostics.shared.record(
+            event: "playback-retry-click", source: onlineSong.source.rawValue,
+            provider: "playback-pipeline", duration: 0,
+            result: "started", detail: "playback_id=\(retryDiagnosticID)"
+        )
         playerStore.pauseForTrackChange()
         isResolvingSong = true
         playbackTask = Task {
@@ -1525,16 +1759,51 @@ struct ContentView: View {
             }
             do {
                 let resolver = LXMusicURLResolver()
-                let url = try await resolver.resolveFresh(song: onlineSong, quality: selectedMusicQuality)
+                let url: URL
+                do {
+                    url = try await resolver.resolveFresh(song: onlineSong, quality: selectedMusicQuality)
+                } catch {
+                    try Task.checkCancellation()
+                    let api = MusicXPlaybackAPI()
+                    guard api.isConfigured else { throw error }
+                    let resolution = try await api.refresh(
+                        song: onlineSong,
+                        failedSource: vpsResolvedSongID == song.id
+                            ? (vpsResolvedSource ?? onlineSong.source.rawValue)
+                            : onlineSong.source.rawValue,
+                        failedTrackID: vpsResolvedSongID == song.id ? vpsResolvedTrackID : nil,
+                        failedTrackMID: vpsResolvedSongID == song.id ? vpsResolvedTrackMID : nil
+                    )
+                    guard let vpsURL = resolution.url else { throw MusicXPlaybackAPI.APIError.noPlayableURL }
+                    vpsResolvedSongID = song.id
+                    vpsResolvedSource = resolution.resolvedSource
+                    vpsResolvedTrackID = resolution.trackID
+                    vpsResolvedTrackMID = resolution.trackMID
+                    url = vpsURL
+                }
                 try Task.checkCancellation()
                 guard playbackRequestID == requestID else { return }
+                MusicSourceDiagnostics.shared.record(
+                    event: "playback-retry-url-ready", source: onlineSong.source.rawValue,
+                    provider: "playback-pipeline", duration: Date().timeIntervalSince(retryStartedAt),
+                    result: "success", detail: "playback_id=\(retryDiagnosticID)"
+                )
                 playerStore.play(url: url, title: onlineSong.title, artist: onlineSong.artist,
-                                 album: onlineSong.album, artworkURL: onlineSong.artworkURL)
+                                 album: onlineSong.album, artworkURL: onlineSong.artworkURL,
+                                 artworkSong: onlineSong, diagnosticID: retryDiagnosticID,
+                                 requestedAt: retryStartedAt, diagnosticSource: onlineSong.source.rawValue)
+                prefetchUpcomingTracks(after: song)
             } catch is CancellationError {
                 return
             } catch {
                 guard playbackRequestID == requestID else { return }
-                searchError = "重新获取播放地址失败：\\(error.localizedDescription)"
+                MusicSourceDiagnostics.shared.record(
+                    event: "playback-retry-url-failed", source: onlineSong.source.rawValue,
+                    provider: "playback-pipeline", duration: Date().timeIntervalSince(retryStartedAt),
+                    result: "failed",
+                    detail: "playback_id=\(retryDiagnosticID); error=\(error.localizedDescription)"
+                )
+                searchError = "重新获取播放地址失败：\(error.localizedDescription)"
                 advanceAfterPlaybackFailure()
             }
         }
@@ -1556,6 +1825,13 @@ struct ContentView: View {
         guard !remaining.isEmpty else {
             searchError = "队列中的歌曲均无法播放，请更换音源或稍后重试"
             return
+        }
+
+        // A failed track breaks the shuffle forward path. Keep the successful
+        // backward history, but do not let Next return to a failed selection path.
+        if isShuffleEnabled {
+            shuffleHistory.removeAll { failedPlaybackSongIDs.contains($0) }
+            shuffleForwardHistory.removeAll()
         }
 
         let next: AppSong
@@ -1581,13 +1857,17 @@ struct ContentView: View {
         let queue = playbackQueue
         guard let index = queue.firstIndex(where: { $0.id == currentSong.id }) else { return }
         if isShuffleEnabled && queue.count > 1 {
-            let candidates = queue.filter { $0.id != currentSong.id }
-            if let next = candidates.randomElement() { select(next) }
+            selectRandomNextTrack(from: queue)
             return
         }
         let nextIndex = index + 1
         if queue.indices.contains(nextIndex) { select(queue[nextIndex]) }
         else if repeatMode == 1, let first = queue.first { select(first) }
+    }
+
+    private func resetShuffleHistory() {
+        shuffleHistory.removeAll()
+        shuffleForwardHistory.removeAll()
     }
 
     private func removeFromQueue(_ song: AppSong) {
@@ -1596,11 +1876,15 @@ struct ContentView: View {
             hasCustomPlaybackQueue = true
         }
         playbackQueueSongs.removeAll { $0.id == song.id }
+        let remainingIDs = Set(playbackQueue.map(\.id))
+        shuffleHistory.removeAll { !remainingIDs.contains($0) }
+        shuffleForwardHistory.removeAll { !remainingIDs.contains($0) }
     }
 
     private func clearQueue() {
         hasCustomPlaybackQueue = true
         playbackQueueSongs = currentSong.map { [$0] } ?? []
+        resetShuffleHistory()
     }
 
     private var tabBar: some View {
@@ -1610,36 +1894,38 @@ struct ContentView: View {
                     if tab == .search && selectedTab != .search {
                         searchSuggestions = ["十年", "突然好想你", "晴天", "青花瓷", "稻香", "后来", "演员", "夜曲", "富士山下", "海阔天空"].shuffled().prefix(4).map { $0 }
                     }
-                    withAnimation(.spring(response: 0.42, dampingFraction: 0.78)) { selectedTab = tab }
+                    withAnimation(.easeInOut(duration: 0.20)) {
+                        selectedTab = tab
+                    }
                 } label: {
                     VStack(spacing: 5) {
                         Image(systemName: tab.symbol)
-                            .font(.system(size: 25, weight: .semibold))
-                            .frame(height: 28)
-                            .symbolEffect(.bounce, value: selectedTab == tab)
-                        Text(tab.rawValue).font(.system(size: 13, weight: .medium)).frame(height: 17)
+                            .font(.system(size: 25, weight: .medium))
+                            .frame(height: 29)
+                            .shadow(color: selectedTab == tab ? Color(red: 0.28, green: 0.58, blue: 1).opacity(0.72) : .clear,
+                                    radius: selectedTab == tab ? 9 : 0, y: 0)
+                        Text(tab.rawValue)
+                            .font(.system(size: 13, weight: .semibold))
                     }
-                    .foregroundStyle(selectedTab == tab ? Color(red: 0.36, green: 0.62, blue: 1.0) : .white.opacity(0.72))
-                    .frame(maxWidth: .infinity).frame(height: 66)
-                    .background {
-                        if selectedTab == tab {
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .fill(Color(red: 0.24, green: 0.32, blue: 0.62).opacity(0.20))
-                                .matchedGeometryEffect(id: "active-tab-glass", in: tabSelectionNamespace)
-                        }
-                    }
+                    .foregroundStyle(selectedTab == tab
+                        ? Color(red: 0.36, green: 0.66, blue: 1)
+                        : .white.opacity(0.78))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 66)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(tab.rawValue)
                 .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 5)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
         .background {
-            Rectangle().fill(.ultraThinMaterial.opacity(0.55))
-                .overlay(Rectangle().fill(Color(red: 0.035, green: 0.045, blue: 0.12).opacity(0.78)))
-                .overlay(alignment: .top) { Rectangle().fill(.white.opacity(0.12)).frame(height: 0.7) }
+            Color(red: 0.045, green: 0.055, blue: 0.12).opacity(0.96)
+                .overlay(alignment: .top) {
+                    Rectangle().fill(.white.opacity(0.12)).frame(height: 0.8)
+                }
         }
     }
 
@@ -1648,6 +1934,7 @@ struct ContentView: View {
         // result set, keeping the tapped song at its natural position.
         playbackQueueSongs = filteredSongs
         hasCustomPlaybackQueue = true
+        resetShuffleHistory()
         select(song)
     }
 
@@ -1655,29 +1942,45 @@ struct ContentView: View {
         // Keep the discovery route mounted while playback starts.
         let appSong = AppSong(id: stableSongID(song), title: song.title, artist: song.artist,
                               album: song.album ?? "", tint: MusicXTheme.blue, onlineSong: song)
-        select(appSong)
+        selectManually(appSong)
+    }
+
+    private func selectManually(_ song: AppSong) {
+        // Tapping the current track only toggles playback; it must not discard
+        // the user's shuffle back/forward navigation path.
+        if currentSong?.id != song.id {
+            resetShuffleHistory()
+        }
+        select(song)
     }
 
     private func select(_ song: AppSong, isFailureFallback: Bool = false) {
         if !isFailureFallback {
             failedPlaybackSongIDs.removeAll()
-            refreshedPlaybackSongIDs.removeAll()
+            playbackRetryCounts.removeAll()
         }
-        if let localURL = song.localFileURL {
-            playbackTask?.cancel()
-            playbackRequestID = UUID()
-            playerStore.play(url: localURL, title: song.title, artist: song.artist,
-                             album: song.album, artworkURL: song.onlineSong?.artworkURL)
-            currentSong = song
-        } else if currentSong?.id == song.id {
+        if currentSong?.id == song.id && playerStore.errorMessage == nil {
             if playerStore.isPlaying { playerStore.pause() }
             else if isResolvingSong { return }
             else { playerStore.resume() }
         } else if let onlineSong = song.onlineSong {
-            // Cancel URL lookups for the previous selection and silence it immediately.
+            // Cancel both stale URL lookups and background prefetch for the previous queue position.
+            playbackPrefetchTask?.cancel()
             playbackTask?.cancel()
             playbackRequestID = UUID()
             let requestID = playbackRequestID
+            // Do not carry VPS track metadata from a previously selected song.
+            vpsResolvedSongID = nil
+            vpsResolvedSource = nil
+            vpsResolvedTrackID = nil
+            vpsResolvedTrackMID = nil
+            let playbackStartedAt = Date()
+            let playbackDiagnosticID = requestID.uuidString
+            MusicSourceDiagnostics.shared.record(
+                event: "playback-click", source: onlineSong.source.rawValue,
+                provider: "playback-pipeline", duration: 0,
+                result: "started", detail: "playback_id=\(playbackDiagnosticID)"
+            )
             // Pause the old stream but retain its AVPlayer item and Now Playing
             // ownership while the next stream URL resolves.
             playerStore.pauseForTrackChange()
@@ -1688,16 +1991,53 @@ struct ContentView: View {
                     if playbackRequestID == requestID { isResolvingSong = false }
                 }
                 do {
-                    let url = try await LXMusicURLResolver().resolve(song: onlineSong, quality: selectedMusicQuality)
+                    let resolver = LXMusicURLResolver()
+                    if !isFailureFallback {
+                        await resolver.resetPlaybackFallbackState(
+                            for: onlineSong,
+                            quality: selectedMusicQuality
+                        )
+                    }
+                    let url: URL
+                    do {
+                        url = try await resolver.resolve(song: onlineSong, quality: selectedMusicQuality)
+                    } catch {
+                        try Task.checkCancellation()
+                        let api = MusicXPlaybackAPI()
+                        guard api.isConfigured else { throw error }
+                        let resolution = try await api.resolve(song: onlineSong)
+                        guard let vpsURL = resolution.url else { throw MusicXPlaybackAPI.APIError.noPlayableURL }
+                        vpsResolvedSongID = song.id
+                        vpsResolvedSource = resolution.resolvedSource
+                        vpsResolvedTrackID = resolution.trackID
+                        vpsResolvedTrackMID = resolution.trackMID
+                        url = vpsURL
+                    }
                     try Task.checkCancellation()
                     guard playbackRequestID == requestID else { return }
+                    let resolutionDuration = Date().timeIntervalSince(playbackStartedAt)
+                    MusicSourceDiagnostics.shared.record(
+                        event: "playback-url-ready", source: onlineSong.source.rawValue,
+                        provider: "playback-pipeline", duration: resolutionDuration,
+                        result: "success", detail: "playback_id=\(playbackDiagnosticID)"
+                    )
                     currentSong = song
                     playerStore.play(url: url, title: onlineSong.title, artist: onlineSong.artist,
-                                     album: onlineSong.album, artworkURL: onlineSong.artworkURL)
+                                     album: onlineSong.album, artworkURL: onlineSong.artworkURL,
+                                     artworkSong: onlineSong, diagnosticID: playbackDiagnosticID,
+                                     requestedAt: playbackStartedAt, diagnosticSource: onlineSong.source.rawValue)
+                    prefetchUpcomingTracks(after: song)
                 } catch is CancellationError {
                     return
                 } catch {
                     guard playbackRequestID == requestID else { return }
+                    MusicSourceDiagnostics.shared.record(
+                        event: "playback-url-failed", source: onlineSong.source.rawValue,
+                        provider: "playback-pipeline",
+                        duration: Date().timeIntervalSince(playbackStartedAt),
+                        result: "failed",
+                        detail: "playback_id=\(playbackDiagnosticID); error=\(error.localizedDescription)"
+                    )
                     isResolvingSong = false
                     searchError = error.localizedDescription
                     advanceAfterPlaybackFailure()
@@ -1720,38 +2060,62 @@ struct ContentView: View {
 
     @MainActor
     private func searchOnline(_ keyword: String) async {
+        let query = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { onlineResults = []; searchError = nil; return }
+        let requestID = UUID()
+        searchRequestID = requestID
         isSearching = true
         searchError = nil
-        defer { isSearching = false }
-        let service = GDStudioMusicSearchService()
-        async let netease = try? service.search(keyword: keyword, source: .netease, count: 50)
-        async let qq = try? service.search(keyword: keyword, source: .qq, count: 50)
-        let sourceResults = [await netease ?? [], await qq ?? []]
-        // Interleave only providers with an implemented playback resolver.
-        var merged: [MusicSong] = []
-        let maxCount = sourceResults.map(\.count).max() ?? 0
-        for index in 0..<maxCount {
-            for source in sourceResults where source.indices.contains(index) {
-                merged.append(source[index])
+        onlineResults = []
+        defer {
+            if searchRequestID == requestID { isSearching = false }
+        }
+
+        var received: [[MusicSong]] = []
+        var failedSources: [String] = []
+        let searchStream = MusicCatalogSearchEngine().search(
+            keyword: query,
+            sources: [.netease, .qq, .kugou, .migu]
+        )
+        for await response in searchStream {
+            let source = response.source
+            let rows = response.songs
+            if let errorMessage = response.errorMessage {
+                failedSources.append("\(source.displayName)：\(errorMessage)")
+            }
+            guard !Task.isCancelled,
+                  searchRequestID == requestID,
+                  searchText.trimmingCharacters(in: .whitespacesAndNewlines) == query else { continue }
+            if !rows.isEmpty {
+                received.append(rows)
+                var merged: [MusicSong] = []
+                let maxCount = received.map(\.count).max() ?? 0
+                for index in 0..<maxCount {
+                    for sourceResults in received where sourceResults.indices.contains(index) {
+                        merged.append(sourceResults[index])
+                    }
+                }
+                var seen = Set<String>()
+                let uniqueResults = merged.filter { item in
+                    let title = normalizedSearchKey(item.title)
+                    let artist = normalizedArtistSearchKey(item.artist)
+                    guard !title.isEmpty, !artist.isEmpty else { return true }
+                    let version = searchVersionMarkers(item)
+                    let durationKey = item.duration.map { String(Int($0.rounded())) } ?? "unknown"
+                    return seen.insert("\(title)|\(artist)|\(version)|\(durationKey)").inserted
+                }
+                onlineResults = Array(uniqueResults.prefix(100)).map { item in
+                    AppSong(id: stableSongID(item), title: item.title, artist: item.artist,
+                            album: item.album ?? "", tint: searchTint(for: item.source), onlineSong: item)
+                }
             }
         }
         guard !Task.isCancelled,
-              searchText.trimmingCharacters(in: .whitespacesAndNewlines) == keyword else { return }
-
-        // Collapse cross-provider duplicates, preserving the first playable source.
-        var seen = Set<String>()
-        let uniqueResults = merged.filter { item in
-            let key = "\(normalizedSearchKey(item.title))|\(normalizedSearchKey(item.artist))"
-            return !key.isEmpty && seen.insert(key).inserted
+              searchRequestID == requestID,
+              searchText.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
+        if onlineResults.isEmpty {
+            searchError = failedSources.isEmpty ? "当前音源暂未返回结果" : "搜索失败：\(failedSources.joined(separator: "；"))"
         }
-        let results = Array(uniqueResults.prefix(50))
-        onlineResults = results.map { item in
-            AppSong(id: stableSongID(item), title: item.title, artist: item.artist,
-                     album: item.album ?? "",
-                     tint: item.source == .netease ? MusicXTheme.blue : item.source == .qq ? .purple : .teal,
-                     onlineSong: item)
-        }
-        if results.isEmpty { searchError = "当前音源暂未返回结果" }
     }
 
     @MainActor
@@ -1760,19 +2124,25 @@ struct ContentView: View {
         isLoadingHomeSongs = true
         homeLoadError = nil
         defer { isLoadingHomeSongs = false }
+
         do {
-            let latestTracks = try await GDStudioMusicSearchService().toplist("新歌榜", count: 50)
+            let latestTracks = try await MusicCatalogSearchEngine().toplist("新歌榜", count: 50)
             guard !Task.isCancelled else { return }
             songs = latestTracks.map { item in
-                AppSong(id: stableSongID(item), title: item.title, artist: item.artist,
-                        album: item.album ?? "", tint: MusicXTheme.blue, onlineSong: item)
+                AppSong(
+                    id: stableSongID(item),
+                    title: item.title,
+                    artist: item.artist,
+                    album: item.album ?? "",
+                    tint: MusicXTheme.blue,
+                    onlineSong: item
+                )
             }
-            recommendationSongs = Array(songs.shuffled().prefix(6))
-            if songs.isEmpty {
-                homeLoadError = "网易云新歌榜暂时没有返回歌曲，请稍后重试"
-            }
+            homeLoadError = nil
         } catch {
-            homeLoadError = "新歌榜加载失败：\(error.localizedDescription)"
+            guard !Task.isCancelled else { return }
+            songs = []
+            homeLoadError = "内容暂时无法加载，请稍后重试"
         }
     }
 
@@ -1806,10 +2176,40 @@ struct ContentView: View {
         }
     }
 
+    private func searchTint(for source: MusicSource) -> Color {
+        switch source {
+        case .netease: MusicXTheme.blue
+        case .qq: .purple
+        case .kuwo: .teal
+        case .kugou: .orange
+        case .migu: .pink
+        case .qishui, .youtubeMusic, .youtube, .spotify: MusicXTheme.muted
+        }
+    }
+
     private func normalizedSearchKey(_ value: String) -> String {
         value.lowercased()
             .folding(options: [.diacriticInsensitive, .widthInsensitive], locale: .current)
             .filter { $0.isLetter || $0.isNumber }
+    }
+
+    private func normalizedArtistSearchKey(_ value: String) -> String {
+        value.split(whereSeparator: { $0 == "/" || $0 == "、" || $0 == "," || $0 == "，" })
+            .map { normalizedSearchKey(String($0)) }
+            .filter { !$0.isEmpty }
+            .sorted()
+            .joined(separator: "+")
+    }
+
+    private func searchVersionMarkers(_ song: MusicSong) -> String {
+        let text = "\(song.title) \(song.album ?? "")".lowercased()
+            .folding(options: [.diacriticInsensitive, .widthInsensitive], locale: .current)
+        let markers = [
+            "live", "remix", "instrumental", "伴奏", "纯音乐", "现场", "演唱会",
+            "翻唱", "cover", "acoustic", "不插电", "demo", "示范", "合唱",
+            "remaster", "重制", "sped up", "slowed", "加速", "降速", "dj"
+        ]
+        return markers.filter { text.contains($0) }.sorted().joined(separator: ",")
     }
 
     private func stableSongID(_ song: MusicSong) -> Int {
@@ -1835,42 +2235,9 @@ struct ContentView: View {
         favoriteSongsJSON = encodedLibrarySongs(stored)
     }
 
-    private func downloadCurrentSong() {
-        guard let appSong = currentSong, let song = appSong.onlineSong else { return }
-        if downloadedSongs.contains(where: { $0.id == appSong.id }) {
-            downloadMessage = "这首歌曲已经下载，可在「我的 → 下载」中收听。"
-            isDownloadAlertPresented = true
-            return
-        }
-        isDownloading = true
-        Task {
-            do {
-                let sourceURL = try await LXMusicURLResolver().resolve(song: song, quality: selectedMusicQuality)
-                let (temporaryURL, response) = try await URLSession.shared.download(from: sourceURL)
-                if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                    throw URLError(.badServerResponse)
-                }
-                try FileManager.default.createDirectory(at: downloadsDirectory, withIntermediateDirectories: true)
-                let ext = sourceURL.pathExtension.isEmpty ? "audio" : sourceURL.pathExtension
-                let fileName = "\(appSong.id)-\(UUID().uuidString).\(ext)"
-                let destination = downloadsDirectory.appendingPathComponent(fileName)
-                try FileManager.default.moveItem(at: temporaryURL, to: destination)
-                var tracks = downloadedTracks
-                tracks.removeAll { $0.id == appSong.id }
-                tracks.append(DownloadedTrack(id: appSong.id, song: song, fileName: fileName))
-                let data = try JSONEncoder().encode(tracks)
-                downloadedTracksJSON = String(decoding: data, as: UTF8.self)
-                downloadMessage = "下载完成，已保存到「我的 → 下载」。"
-            } catch {
-                downloadMessage = "下载失败：\(error.localizedDescription)"
-            }
-            isDownloading = false
-            isDownloadAlertPresented = true
-        }
-    }
 }
 
-private struct SongArtworkView: View {
+struct SongArtworkView: View {
     let song: MusicSong
     let tint: Color
     let size: CGFloat
@@ -2035,32 +2402,52 @@ private struct SearchCategoryCard: View {
     let tint: Color
     let action: () -> Void
 
+    private var designGradient: [Color] {
+        switch title {
+        case "华语流行":
+            [Color(red: 0.12, green: 0.41, blue: 0.84), Color(red: 0.07, green: 0.25, blue: 0.53), Color(red: 0.04, green: 0.11, blue: 0.25)]
+        case "经典老歌":
+            [Color(red: 0.73, green: 0.22, blue: 0.55), Color(red: 0.45, green: 0.13, blue: 0.38), Color(red: 0.14, green: 0.07, blue: 0.19)]
+        case "轻音乐":
+            [Color(red: 0.11, green: 0.62, blue: 0.50), Color(red: 0.07, green: 0.38, blue: 0.34), Color(red: 0.04, green: 0.13, blue: 0.18)]
+        case "纯音乐":
+            [Color(red: 0.50, green: 0.25, blue: 0.83), Color(red: 0.29, green: 0.14, blue: 0.51), Color(red: 0.09, green: 0.07, blue: 0.21)]
+        case "摇滚":
+            [Color(red: 0.83, green: 0.35, blue: 0.11), Color(red: 0.50, green: 0.20, blue: 0.07), Color(red: 0.15, green: 0.09, blue: 0.11)]
+        default:
+            [Color(red: 0.12, green: 0.57, blue: 0.77), Color(red: 0.07, green: 0.33, blue: 0.48), Color(red: 0.04, green: 0.11, blue: 0.21)]
+        }
+    }
+
     var body: some View {
         Button(action: action) {
             ZStack(alignment: .leading) {
-                Image(asset).resizable().scaledToFill()
-                LinearGradient(colors: [.black.opacity(0.10), tint.opacity(0.06), .black.opacity(0.24)], startPoint: .leading, endPoint: .trailing)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(title).font(.system(size: 18, weight: .bold)).foregroundStyle(.white)
-                        .shadow(color: .black.opacity(0.30), radius: 5, y: 1)
-                    Text(subtitle).font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.90))
-                        .shadow(color: .black.opacity(0.28), radius: 4, y: 1)
-                }.padding(.leading, 15)
-                RoundedRectangle(cornerRadius: 17, style: .continuous)
-                    .fill(LinearGradient(colors: [.white.opacity(0.18), .clear, tint.opacity(0.10)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .blendMode(.screen)
-                    .allowsHitTesting(false)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(LinearGradient(colors: designGradient, startPoint: .topLeading, endPoint: .bottomTrailing))
+                VStack(alignment: .leading, spacing: 8) {
+                    Image(systemName: symbol)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 28, height: 28)
+                        .background(.white.opacity(0.25), in: Circle())
+                        .overlay(Circle().stroke(.white.opacity(0.12), lineWidth: 0.8))
+                    Spacer(minLength: 0)
+                    Text(title)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(.white)
+                    Text(subtitle)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.88))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 91)
-            .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 17, style: .continuous)
-                    .stroke(LinearGradient(colors: [.white.opacity(0.62), tint.opacity(0.60), .white.opacity(0.16)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
-            }
-            .shadow(color: tint.opacity(0.22), radius: 9, y: 3)
-        }.buttonStyle(.plain)
+            .frame(height: 100)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(tint.opacity(0.82), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 }
 
