@@ -2053,62 +2053,38 @@ struct ContentView: View {
 
     @MainActor
     private func searchOnline(_ keyword: String) async {
-        let query = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { onlineResults = []; searchError = nil; return }
-        let requestID = UUID()
-        searchRequestID = requestID
         isSearching = true
         searchError = nil
-        onlineResults = []
-        defer {
-            if searchRequestID == requestID { isSearching = false }
-        }
-
-        var received: [[MusicSong]] = []
-        var failedSources: [String] = []
-        let searchStream = MusicCatalogSearchEngine().search(
-            keyword: query,
-            sources: [.netease, .qq, .kugou, .migu]
-        )
-        for await response in searchStream {
-            let source = response.source
-            let rows = response.songs
-            if let errorMessage = response.errorMessage {
-                failedSources.append("\(source.displayName)：\(errorMessage)")
-            }
-            guard !Task.isCancelled,
-                  searchRequestID == requestID,
-                  searchText.trimmingCharacters(in: .whitespacesAndNewlines) == query else { continue }
-            if !rows.isEmpty {
-                received.append(rows)
-                var merged: [MusicSong] = []
-                let maxCount = received.map(\.count).max() ?? 0
-                for index in 0..<maxCount {
-                    for sourceResults in received where sourceResults.indices.contains(index) {
-                        merged.append(sourceResults[index])
-                    }
-                }
-                var seen = Set<String>()
-                let uniqueResults = merged.filter { item in
-                    let title = normalizedSearchKey(item.title)
-                    let artist = normalizedArtistSearchKey(item.artist)
-                    guard !title.isEmpty, !artist.isEmpty else { return true }
-                    let version = searchVersionMarkers(item)
-                    let durationKey = item.duration.map { String(Int($0.rounded())) } ?? "unknown"
-                    return seen.insert("\(title)|\(artist)|\(version)|\(durationKey)").inserted
-                }
-                onlineResults = Array(uniqueResults.prefix(100)).map { item in
-                    AppSong(id: stableSongID(item), title: item.title, artist: item.artist,
-                            album: item.album ?? "", tint: searchTint(for: item.source), onlineSong: item)
-                }
+        defer { isSearching = false }
+        let service = GDStudioMusicSearchService()
+        async let netease = try? service.search(keyword: keyword, source: .netease, count: 50)
+        async let qq = try? service.search(keyword: keyword, source: .qq, count: 50)
+        let sourceResults = [await netease ?? [], await qq ?? []]
+        // Interleave only providers with an implemented playback resolver.
+        var merged: [MusicSong] = []
+        let maxCount = sourceResults.map(\.count).max() ?? 0
+        for index in 0..<maxCount {
+            for source in sourceResults where source.indices.contains(index) {
+                merged.append(source[index])
             }
         }
         guard !Task.isCancelled,
-              searchRequestID == requestID,
-              searchText.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
-        if onlineResults.isEmpty {
-            searchError = failedSources.isEmpty ? "当前音源暂未返回结果" : "搜索失败：\(failedSources.joined(separator: "；"))"
+              searchText.trimmingCharacters(in: .whitespacesAndNewlines) == keyword else { return }
+
+        // Collapse cross-provider duplicates, preserving the first playable source.
+        var seen = Set<String>()
+        let uniqueResults = merged.filter { item in
+            let key = "\(normalizedSearchKey(item.title))|\(normalizedSearchKey(item.artist))"
+            return !key.isEmpty && seen.insert(key).inserted
         }
+        let results = Array(uniqueResults.prefix(50))
+        onlineResults = results.map { item in
+            AppSong(id: stableSongID(item), title: item.title, artist: item.artist,
+                     album: item.album ?? "",
+                     tint: item.source == .netease ? MusicXTheme.blue : item.source == .qq ? .purple : .teal,
+                     onlineSong: item)
+        }
+        if results.isEmpty { searchError = "当前音源暂未返回结果" }
     }
 
     @MainActor
