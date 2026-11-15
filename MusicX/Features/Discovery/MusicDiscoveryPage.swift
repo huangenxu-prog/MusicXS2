@@ -54,7 +54,7 @@ struct MusicDiscoveryPage: View {
         case .playlists: "精选歌单"
         case .charts, .chart: "排行榜"
         case .newReleases: "新歌速递"
-        case .playlist(let name): name
+        case .playlist(let name): name.contains(":") ? "精选歌单" : name
         case .album(let title, _): title
         }
     }
@@ -365,7 +365,7 @@ struct MusicDiscoveryPage: View {
             ("通勤驾驶精选", "通勤路上 · 有前行感的节奏", "category_rock")
         ]
         let liveItems: [(String, String, String)] = platformCollections.map { collection in
-            (collection.name, collection.provider == .qq ? "QQ 音乐推荐" : "网易云音乐推荐", "category_singers")
+            ("\\(collection.provider.rawValue):\\(collection.sourceID)", collection.provider == .qq ? "QQ 音乐推荐" : "网易云音乐推荐", collection.name)
         }
         let displayItems = liveItems.isEmpty ? items : liveItems
         return LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 18) {
@@ -373,7 +373,7 @@ struct MusicDiscoveryPage: View {
                 Button { onOpenPlaylist(item.0) } label: {
                     VStack(alignment: .leading, spacing: 7) {
                         ZStack(alignment: .bottomTrailing) {
-                            Image(item.2)
+                            Image(item.0.contains(":") ? "category_singers" : item.2)
                                 .resizable()
                                 .scaledToFill()
                                 .frame(maxWidth: .infinity)
@@ -388,7 +388,7 @@ struct MusicDiscoveryPage: View {
                                 .overlay(Circle().stroke(.white.opacity(0.38), lineWidth: 1))
                                 .padding(10)
                         }
-                        Text(item.0).font(.system(size: 16, weight: .bold)).foregroundStyle(.white).lineLimit(1)
+                        Text(item.0.contains(":") ? item.2 : item.0).font(.system(size: 16, weight: .bold)).foregroundStyle(.white).lineLimit(1)
                         Text(item.1).font(.system(size: 12, weight: .medium)).foregroundStyle(MusicXTheme.muted).lineLimit(2)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -511,7 +511,7 @@ struct MusicDiscoveryPage: View {
             case .playlist:
                 let catalog = PlatformCollectionCatalog()
                 let collections = try? await catalog.remainingRecommendedCollections()
-                if let selected = collections?.first(where: { $0.name == query }) {
+                if let selected = collections?.first(where: { $0.id == query }) {
                     result = try await catalog.tracks(for: selected, count: 50)
                 } else {
                     result = try await service.playlistTracks(keyword: query, count: 50)
