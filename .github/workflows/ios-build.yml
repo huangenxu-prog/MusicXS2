@@ -6,6 +6,7 @@ on:
       - ios/initial-scaffold
       - home/final-design-asset-pass
       - feature/official-collections-dual-source
+      - test/ui-461-preview
   workflow_dispatch:
 
 permissions:
