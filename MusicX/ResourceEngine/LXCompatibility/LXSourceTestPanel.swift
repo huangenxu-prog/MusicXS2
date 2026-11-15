@@ -187,6 +187,10 @@ struct LXSourceTestPanel: View {
                 } catch {
                     songs = try await service.search(keyword: query, source: platform, count: 20)
                 }
+            } else if testPlatform == "kg" {
+                songs = try await service.searchKugouNative(keyword: query, count: 20)
+            } else if testPlatform == "kw" {
+                songs = try await service.searchKuwoNative(keyword: query, count: 20)
             } else {
                 songs = try await service.search(keyword: query, source: platform, count: 20)
             }
