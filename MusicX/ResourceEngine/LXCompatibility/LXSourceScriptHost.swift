@@ -45,8 +45,13 @@ final class LXSourceScriptHost {
             guard event == "inited" else { return }
             self?.registeredSources = payload.toDictionary()?["sources"] as? [String: Any] ?? [:]
         }
-        context.setObject(unsafeBitCast(network, to: AnyObject.self), forKeyedSubscript: "__lxHTTP" as NSString)
-        context.setObject(unsafeBitCast(registration, to: AnyObject.self), forKeyedSubscript: "__lxSend" as NSString)
+        let complete: @convention(block) (Int, String, String) -> Void = { [weak self] id, value, error in
+            if !error.isEmpty { self?.finish(id: id, result: .failure(HostError.initialization(error))) }
+            else { self?.finish(id: id, result: .success(value)) }
+        }
+        context.setObject(network, forKeyedSubscript: "__lxHTTP" as NSString)
+        context.setObject(complete, forKeyedSubscript: "__lxComplete" as NSString)
+        context.setObject(registration, forKeyedSubscript: "__lxSend" as NSString)
         context.evaluateScript(Self.bootstrap)
         context.evaluateScript(script)
         if let error = lastError {
