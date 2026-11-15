@@ -28,6 +28,9 @@ final class LXSourceScriptHost {
     private(set) var initializationEvents: [String] = []
     private(set) var didReceiveInitialization = false
     private var nextRequestID = 0
+    // JSValue callbacks must remain strongly rooted until URLSession completes.
+    private var nextHTTPID = 0
+    private var pendingHTTPCallbacks: [Int: JSValue] = [:]
     private var completions: [Int: (Result<String, Error>) -> Void] = [:]
     private var timeoutTasks: [Int: Task<Void, Never>] = [:]
 
@@ -107,36 +110,67 @@ final class LXSourceScriptHost {
     }
 
     private func performHTTP(url: String, options: JSValue, callback: JSValue) {
-        guard let target = URL(string: url), ["https", "http"].contains(target.scheme?.lowercased() ?? ""),
+        nextHTTPID += 1
+        let requestID = nextHTTPID
+        // JSCore may collect an asynchronously captured JS function unless
+        // the owning host keeps a strong JSValue reference.
+        pendingHTTPCallbacks[requestID] = callback
+        guard let target = URL(string: url),
+              ["https", "http"].contains(target.scheme?.lowercased() ?? ""),
               target.host != nil else {
-            callback.call(withArguments: ["Invalid HTTP URL", NSNull()])
+            finishHTTP(id: requestID, error: "Invalid HTTP URL", response: nil)
             return
         }
         let opts = options.toDictionary() ?? [:]
         var request = URLRequest(url: target)
         request.httpMethod = opts["method"] as? String ?? "GET"
         if let headers = opts["headers"] as? [String: Any] {
-            for (key, value) in headers { request.setValue(String(describing: value), forHTTPHeaderField: key) }
+            for (key, value) in headers {
+                request.setValue(String(describing: value), forHTTPHeaderField: key)
+            }
         }
         if let body = opts["body"] as? String { request.httpBody = Data(body.utf8) }
         if let timeout = opts["timeout"] as? NSNumber {
             request.timeoutInterval = max(1, timeout.doubleValue / 1000)
         }
-        session.dataTask(with: request) { data, response, error in
-            DispatchQueue.main.async {
+        initializationEvents.append("HTTP start #\(requestID) \(target.host ?? "unknown")")
+        session.dataTask(with: request) { [weak self] data, response, error in
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
                 if let error {
-                    callback.call(withArguments: [error.localizedDescription, NSNull()])
+                    self.finishHTTP(id: requestID, error: error.localizedDescription, response: nil)
                     return
                 }
                 let http = response as? HTTPURLResponse
-                let body = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
-                callback.call(withArguments: [
-                    NSNull(),
-                    ["body": body, "statusCode": http?.statusCode ?? 0,
-                     "headers": http?.allHeaderFields ?? [:]]
+                let raw = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+                let body: Any
+                // LX request returns a decoded object for JSON response bodies.
+                // Preserve plain text for endpoints that do not return JSON.
+                if let data, let parsed = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) {
+                    body = parsed
+                } else {
+                    body = raw
+                }
+                self.finishHTTP(id: requestID, error: nil, response: [
+                    "body": body,
+                    "statusCode": http?.statusCode ?? 0,
+                    "statusMessage": HTTPURLResponse.localizedString(forStatusCode: http?.statusCode ?? 0),
+                    "headers": http?.allHeaderFields ?? [:]
                 ])
             }
         }.resume()
+    }
+
+    private func finishHTTP(id: Int, error: String?, response: [String: Any]?) {
+        guard let callback = pendingHTTPCallbacks.removeValue(forKey: id) else { return }
+        if let error {
+            initializationEvents.append("HTTP error #\(id): \(error)")
+            callback.call(withArguments: [error, NSNull()])
+        } else {
+            let status = response?["statusCode"] as? Int ?? 0
+            initializationEvents.append("HTTP complete #\(id): \(status)")
+            callback.call(withArguments: [NSNull(), response ?? [:]])
+        }
     }
 
     private static func jsonString(_ object: Any) -> String {
