@@ -21,6 +21,7 @@ struct LXSourceTestPanel: View {
     @State private var previewPlayer: AVPlayer?
     @State private var previewURL: URL?
     @State private var previewDiagnosticTask: Task<Void, Never>?
+    @State private var isProbingURL = false
 
     var body: some View {
         NavigationStack {
@@ -96,6 +97,9 @@ struct LXSourceTestPanel: View {
                     if isResolving { ProgressView("正在解析选中的歌曲…") }
                     if previewURL != nil {
                         Button(previewPlayer == nil ? "试听解析结果" : "停止试听") { togglePreview() }
+                        Button(isProbingURL ? "正在检查地址…" : "诊断播放地址") {
+                            Task { await probePreviewURL() }
+                        }.disabled(isProbingURL)
                     }
                     Text("选择平台后搜索并取链。搜索仍使用现有服务，尚未移植洛雪原生搜索模块。")
                         .font(.caption).foregroundStyle(.secondary)
@@ -245,6 +249,45 @@ struct LXSourceTestPanel: View {
         previewDiagnosticTask = nil
         previewPlayer?.pause()
         previewPlayer = nil
+    }
+
+    /// Probe only the first bytes of the resolved URL; never download a whole song.
+    /// The request is intentionally separate from AVPlayer to distinguish
+    /// invalid backend responses from player/codec failures.
+    @MainActor
+    private func probePreviewURL() async {
+        guard let url = previewURL, !isProbingURL else { return }
+        isProbingURL = true
+        defer { isProbingURL = false }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("bytes=0-255", forHTTPHeaderField: "Range")
+        request.timeoutInterval = 12
+        do {
+            let (bytes, response) = try await URLSession.shared.bytes(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                message = "地址诊断：服务器未返回 HTTP 响应"
+                return
+            }
+            var prefix = [UInt8]()
+            for try await byte in bytes {
+                prefix.append(byte)
+                if prefix.count >= 128 { break }
+            }
+            let mime = http.value(forHTTPHeaderField: "Content-Type") ?? "未提供"
+            let location = http.url?.host ?? "未知"
+            let signature = prefix.prefix(16).map { String(format: "%02X", $0) }.joined(separator: " ")
+            let text = String(bytes: prefix, encoding: .utf8) ?? ""
+            let looksLikePage = text.lowercased().contains("<html") ||
+                text.lowercased().contains("<!doctype") ||
+                text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("{")
+            let classification = looksLikePage ? "疑似网页或 JSON 错误响应" :
+                (mime.lowercased().contains("audio") || mime.lowercased().contains("octet-stream") ?
+                 "响应类型可能是音频" : "响应类型未确认是音频")
+            message = "地址诊断：HTTP \(http.statusCode)；最终域名：\(location)；Content-Type：\(mime)；接收前缀：\(prefix.count) 字节；特征：\(signature)；判断：\(classification)。"
+        } catch {
+            message = "地址诊断请求失败：\(error.localizedDescription)"
+        }
     }
 
     @MainActor
