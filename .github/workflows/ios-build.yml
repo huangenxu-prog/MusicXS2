@@ -6,6 +6,7 @@ on:
       - ios/initial-scaffold
       - home/final-design-asset-pass
       - feature/official-collections-dual-source
+      - test/ui-build-486-exact
   workflow_dispatch:
 
 permissions:
