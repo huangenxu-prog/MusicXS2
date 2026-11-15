@@ -142,23 +142,19 @@ struct MusicResourceEngine {
         quality: MusicQuality,
         excludingProviderIDs: Set<String> = []
     ) async throws -> ResolvedMusicResource {
-        // Native source first, then cross-platform matching. Never reject QQ
-        // catalog tracks before the registered QQ providers can resolve them.
+        // Resolve only through the selected platform. NetEase may use pyncmd
+        // when its native URL is unavailable; QQ stays on QQ providers.
         let providers: [(provider: any MusicResourceProvider, tier: Int, baseline: Int)]
         switch song.source {
         case .qq:
             providers = [
                 (QQGDStudioAudioProvider(session: session), 0, 1_000),
-                (QQChkszAudioProvider(session: session), 1, 900),
-                (MusicXLegacySupplierLibrary(session: session), 2, 100)
+                (QQChkszAudioProvider(session: session), 1, 900)
             ]
         case .netease:
             providers = [
                 (NetEaseNativeAudioProvider(session: session), 0, 1_000),
-                (KumonePyncmdAudioSourceProvider(), 1, 100),
-                (MusicXLegacySupplierLibrary(session: session), 2, 90),
-                (KumoneKugouAudioSourceProvider(session: session), 3, 80),
-                (KumoneKuwoAudioSourceProvider(), 4, 70)
+                (KumonePyncmdAudioSourceProvider(), 1, 100)
             ]
         default:
             providers = [
