@@ -11,6 +11,9 @@ struct GDStudioMusicSearchService {
     func search(keyword: String, source: MusicSource, page: Int = 1, count: Int = 20, albumOnly: Bool = false) async throws -> [MusicSong] {
         let query = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return [] }
+        guard source == .netease || source == .qq else {
+            throw MusicSourceError.unsupportedSource(source)
+        }
         let cacheKey = "search|\(source.rawValue)|\(query.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current))|\(page)|\(count)|\(albumOnly)"
         if let cached: [MusicSong] = await MusicCache.shared.value(for: cacheKey) {
             return cached
@@ -226,11 +229,7 @@ struct GDStudioMusicSearchService {
         switch source {
         case .netease: "netease"
         case .qq: "tencent"
-        case .kuwo: "kuwo"
-        case .kugou: "kugou"
-        case .migu: "migu"
-        case .qishui: "netease"
-        case .youtubeMusic, .youtube, .spotify: "netease"
+        default: "netease" // Legacy sources are rejected before this mapping.
         }
     }
 }
