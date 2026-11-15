@@ -73,7 +73,7 @@ struct LXSourceTestPanel: View {
             }
             .navigationTitle("音源测试")
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("关闭") { dismiss() } } }
-            .fileImporter(isPresented: $isImporterPresented, allowedContentTypes: [.javascript, .plainText], allowsMultipleSelection: true) { result in
+            .fileImporter(isPresented: $isImporterPresented, allowedContentTypes: [.plainText, .data], allowsMultipleSelection: true) { result in
                 do {
                     let files = try result.get()
                     let library = try getLibrary()
