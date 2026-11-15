@@ -22,6 +22,11 @@ targets:
         UILaunchStoryboardName: LaunchScreen
         UIBackgroundModes:
           - audio
+        NSAppTransportSecurity:
+          NSExceptionDomains:
+            yinyue.haitangw.net:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSIncludesSubdomains: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.huangenxu.musicx
