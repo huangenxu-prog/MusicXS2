@@ -34,6 +34,7 @@ final class PlayerStore: ObservableObject {
     private var artworkImage: UIImage?
     private var artworkTask: Task<Void, Never>?
     private var artworkRequestID = UUID()
+    private var seekRequestID = UUID()
     private var playerStatusObservation: NSKeyValueObservation?
     private var itemStatusObservation: NSKeyValueObservation?
     private var lifecycleObservers: [NSObjectProtocol] = []
@@ -68,6 +69,15 @@ final class PlayerStore: ObservableObject {
                 guard let self, item === self.player.currentItem else { return }
                 self.recordDiagnostic("item-status=\(item.status.rawValue) \(error)")
                 if item.status == .failed {
+                    if let diagnosticID = self.activePlaybackDiagnosticID {
+                        let elapsed = self.activePlaybackRequestedAt.map { Date().timeIntervalSince($0) } ?? 0
+                        MusicSourceDiagnostics.shared.record(
+                            event: "playback-item-failed", source: self.activePlaybackDiagnosticSource,
+                            provider: "avplayer", duration: elapsed,
+                            result: "failed",
+                            detail: "playback_id=\(diagnosticID); error=\(error)"
+                        )
+                    }
                     let shouldAdvanceQueue = self.wantsPlayback
                     self.wantsPlayback = false
                     self.player.pause()
@@ -77,7 +87,7 @@ final class PlayerStore: ObservableObject {
                     self.recordDiagnostic("playback-failed \(error)")
                     self.updateNowPlayingInfo()
                     if shouldAdvanceQueue {
-                        NotificationCenter.default.post(name: .musicXPlaybackFailed, object: nil)
+                        NotificationCenter.default.post(name: .musicXPlaybackFailed, object: item)
                     }
                 }
             }
@@ -98,7 +108,20 @@ final class PlayerStore: ObservableObject {
                 self.isBuffering = shouldBeBuffering
                 if self.isPlaying != shouldBePlaying {
                     self.isPlaying = shouldBePlaying
-                    if shouldBePlaying { self.errorMessage = nil }
+                    if shouldBePlaying {
+                        self.errorMessage = nil
+                        if !self.didRecordPlaybackStart,
+                           let diagnosticID = self.activePlaybackDiagnosticID,
+                           let requestedAt = self.activePlaybackRequestedAt {
+                            self.didRecordPlaybackStart = true
+                            MusicSourceDiagnostics.shared.record(
+                                event: "playback-started", source: self.activePlaybackDiagnosticSource,
+                                provider: "avplayer", duration: Date().timeIntervalSince(requestedAt),
+                                result: "playing",
+                                detail: "playback_id=\(diagnosticID); marker=timeControlStatus.playing"
+                            )
+                        }
+                    }
                     self.updateNowPlayingInfo()
                 }
             }
@@ -111,8 +134,17 @@ final class PlayerStore: ObservableObject {
             Task { @MainActor [weak self] in self?.recordDiagnostic("app-will-enter-foreground") }
         })
         lifecycleObservers.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] note in
-            let reason = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt).map(String.init) ?? "unknown"
-            Task { @MainActor [weak self] in self?.recordDiagnostic("audio-route-change=\(reason)") }
+            let rawReason = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+            let reason = rawReason.map(String.init) ?? "unknown"
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.recordDiagnostic("audio-route-change=\(reason)")
+                if rawReason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue,
+                   self.wantsPlayback {
+                    self.recordDiagnostic("audio-route-change-pause")
+                    self.pause()
+                }
+            }
         })
         lifecycleObservers.append(center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in
@@ -125,10 +157,14 @@ final class PlayerStore: ObservableObject {
 
         let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
         timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
+            // Bind this tick to the item that produced it. The MainActor task may run
+            // after a track change, in which case the old timestamp must be discarded.
+            guard let observedItem = self?.player.currentItem else { return }
+            Task { @MainActor [weak self, weak observedItem] in
+                guard let self, let observedItem,
+                      self.player.currentItem === observedItem else { return }
                 self.currentTime = max(0, time.seconds.isFinite ? time.seconds : 0)
-                let seconds = self.player.currentItem?.duration.seconds ?? 0
+                let seconds = observedItem.duration.seconds
                 self.duration = seconds.isFinite ? max(0, seconds) : 0
 
                 // Publish duration once it becomes available. Do not continuously
@@ -146,7 +182,8 @@ final class PlayerStore: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self,
                       let item = notification.object as? AVPlayerItem,
-                      item === self.player.currentItem else { return }
+                      item === self.player.currentItem,
+                      self.wantsPlayback else { return }
                 self.wantsPlayback = false
                 self.isPlaying = false
                 self.currentTime = self.duration
@@ -187,8 +224,10 @@ final class PlayerStore: ObservableObject {
         switch type {
         case .began:
             recordDiagnostic("audio-interruption-began")
-            // Keep the intent separate from AVPlayer's transient state.
+            // Keep playback intent for a possible system-approved resume, but
+            // stop presenting the interrupted stream as actively buffering.
             isPlaying = false
+            isBuffering = false
             updateNowPlayingInfo()
         case .ended:
             recordDiagnostic("audio-interruption-ended")
@@ -256,29 +295,55 @@ final class PlayerStore: ObservableObject {
         else { MPNowPlayingInfoCenter.default().nowPlayingInfo = nil }
     }
 
-    func play(url: URL, title: String, artist: String, album: String? = nil, artworkURL: URL? = nil) {
+    private var activePlaybackDiagnosticID: String?
+    private var activePlaybackRequestedAt: Date?
+    private var activePlaybackDiagnosticSource = "unknown"
+    private var didRecordPlaybackStart = false
+
+    func play(url: URL, title: String, artist: String, album: String? = nil,
+              artworkURL: URL? = nil, artworkSong: MusicSong? = nil,
+              diagnosticID: String? = nil, requestedAt: Date? = nil,
+              diagnosticSource: String? = nil) {
         errorMessage = nil
+        activePlaybackDiagnosticID = diagnosticID
+        activePlaybackRequestedAt = requestedAt
+        activePlaybackDiagnosticSource = diagnosticSource ?? "unknown"
+        didRecordPlaybackStart = false
+        seekRequestID = UUID()
         trackTitle = title
         trackArtist = artist
         trackAlbum = album
-        artworkImage = nil
+        // Publish a visible fallback immediately; replace it with the real cover as soon as metadata resolves.
+        artworkImage = defaultNowPlayingArtwork()
         artworkTask?.cancel()
         artworkRequestID = UUID()
         let requestID = artworkRequestID
-        if let artworkURL {
+        if artworkURL != nil || artworkSong != nil {
             artworkTask = Task { [weak self] in
-                let cacheKey = "artwork-data|\(artworkURL.absoluteString)"
-                var data: Data? = await MusicCache.shared.value(for: cacheKey)
-                if data == nil,
-                   let (downloaded, response) = try? await URLSession.shared.data(from: artworkURL),
-                   (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true {
-                    data = downloaded
-                    await MusicCache.shared.insert(downloaded, for: cacheKey, ttl: 7 * 24 * 60 * 60)
+                var candidateURLs: [URL] = []
+                if let artworkURL { candidateURLs.append(artworkURL) }
+                if let artworkSong,
+                   let metadataURL = try? await GDStudioMetadataService().artworkURL(for: artworkSong),
+                   !candidateURLs.contains(metadataURL) {
+                    candidateURLs.append(metadataURL)
                 }
-                guard !Task.isCancelled, let data, let image = UIImage(data: data) else { return }
-                guard let self, self.artworkRequestID == requestID else { return }
-                self.artworkImage = image
-                self.updateNowPlayingInfo()
+                for candidateURL in candidateURLs {
+                    guard !Task.isCancelled else { return }
+                    let cacheKey = "artwork-data|\(candidateURL.absoluteString)"
+                    var data: Data? = await MusicCache.shared.value(for: cacheKey)
+                    if data == nil,
+                       let (downloaded, response) = try? await URLSession.shared.data(from: candidateURL),
+                       (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true {
+                        data = downloaded
+                        await MusicCache.shared.insert(downloaded, for: cacheKey, ttl: 7 * 24 * 60 * 60)
+                    }
+                    if let data, let image = UIImage(data: data) {
+                        guard !Task.isCancelled, let self, self.artworkRequestID == requestID else { return }
+                        self.artworkImage = image
+                        self.updateNowPlayingInfo()
+                        return
+                    }
+                }
             }
         }
         MPRemoteCommandCenter.shared().nextTrackCommand.isEnabled = true
@@ -300,6 +365,10 @@ final class PlayerStore: ObservableObject {
 
     /// Pause the current stream while retaining its AVPlayer item and Now Playing ownership.
     /// Used while resolving the next track so the previous song does not continue underneath.
+    func isCurrentItem(_ item: AVPlayerItem) -> Bool {
+        player.currentItem === item
+    }
+
     func pauseForTrackChange() {
         wantsPlayback = false
         player.pause()
@@ -353,9 +422,14 @@ final class PlayerStore: ObservableObject {
         isPlaying = false
         isBuffering = true
         errorMessage = nil
+        seekRequestID = UUID()
+        let requestID = seekRequestID
         item.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self, weak item] finished in
             Task { @MainActor [weak self, weak item] in
-                guard let self, let item, finished, self.player.currentItem === item, self.wantsPlayback else { return }
+                guard let self, let item, finished,
+                      self.player.currentItem === item,
+                      self.seekRequestID == requestID,
+                      self.wantsPlayback else { return }
                 self.player.playImmediately(atRate: 1.0)
                 self.currentTime = 0
                 self.updateNowPlayingInfo()
@@ -364,16 +438,20 @@ final class PlayerStore: ObservableObject {
     }
 
     func seek(to seconds: TimeInterval) {
-        guard duration > 0 else { return }
+        guard duration > 0, let item = player.currentItem else { return }
         let target = min(max(0, seconds), duration)
-        player.seek(
+        seekRequestID = UUID()
+        let requestID = seekRequestID
+        item.seek(
             to: CMTime(seconds: target, preferredTimescale: 600),
             toleranceBefore: .zero,
             toleranceAfter: .zero
-        ) { [weak self] finished in
+        ) { [weak self, weak item] finished in
             guard finished else { return }
-            Task { @MainActor [weak self] in
-                guard let self else { return }
+            Task { @MainActor [weak self, weak item] in
+                guard let self, let item,
+                      self.player.currentItem === item,
+                      self.seekRequestID == requestID else { return }
                 self.currentTime = target
                 self.updateNowPlayingInfo()
             }
@@ -382,6 +460,7 @@ final class PlayerStore: ObservableObject {
 
     func stop() {
         wantsPlayback = false
+        seekRequestID = UUID()
         player.pause()
         let oldItem = player.currentItem
         player.replaceCurrentItem(with: nil)
@@ -399,6 +478,18 @@ final class PlayerStore: ObservableObject {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
 
+    private func defaultNowPlayingArtwork() -> UIImage {
+        if let bundled = UIImage(named: "player_cover") { return bundled }
+        let size = CGSize(width: 256, height: 256)
+        return UIGraphicsImageRenderer(size: size).image { context in
+            UIColor(red: 0.12, green: 0.22, blue: 0.42, alpha: 1).setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            if let note = UIImage(systemName: "music.note")?.withTintColor(.white.withAlphaComponent(0.92)) {
+                note.draw(in: CGRect(x: 88, y: 78, width: 80, height: 100))
+            }
+        }
+    }
+
     private func updateNowPlayingInfo() {
         guard publishesNowPlayingInfo else { return }
         var info: [String: Any] = [
@@ -414,9 +505,8 @@ final class PlayerStore: ObservableObject {
         if duration > 0 {
             info[MPMediaItemPropertyPlaybackDuration] = duration
         }
-        if let artworkImage {
-            info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: artworkImage.size) { _ in artworkImage }
-        }
+        let publishedArtwork = artworkImage ?? defaultNowPlayingArtwork()
+        info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: publishedArtwork.size) { _ in publishedArtwork }
         let center = MPNowPlayingInfoCenter.default()
         center.nowPlayingInfo = info
         center.playbackState = isPlaying ? .playing : .paused
