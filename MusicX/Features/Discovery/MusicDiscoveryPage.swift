@@ -412,18 +412,11 @@ struct MusicDiscoveryPage: View {
         do {
             let result: [MusicSong]
             if tab == .daily {
-                // Temporary NetEase-only feed while other catalogs are disabled.
-                let dailyFeed = try await catalog.dailyRecommendedSongs(count: 100)
-                result = Array(dailyFeed.filter { $0.source == .netease }.prefix(30))
-                guard !result.isEmpty else {
-                    throw MusicSourceError.invalidResponse("网易云每日推荐没有返回歌曲")
-                }
-                guard !result.isEmpty else {
-                    throw MusicSourceError.invalidResponse("QQ每日推荐没有返回歌曲，请检查QQ每日推荐接口")
-                }
+                // QQ 第一条推荐合集中的歌曲，保留 Build 486 的页面样式。
+                result = try await PlatformCollectionCatalog().firstCollectionSongs(provider: .qq, count: 50)
             } else {
-                // 精选歌曲独立于每日推荐：从平台热歌榜提取真实歌曲条目。
-                result = Array((try await catalog.toplist("热歌榜", count: 100)).shuffled().prefix(50))
+                // 网易云第一条推荐合集中的歌曲，而非歌单卡片。
+                result = try await PlatformCollectionCatalog().firstCollectionSongs(provider: .netease, count: 50)
             }
             guard !Task.isCancelled, songsLoadToken == requestToken else { return }
             recommendationSongCache[tab] = result
