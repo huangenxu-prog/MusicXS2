@@ -14,6 +14,7 @@ struct LXSourceTestPanel: View {
     @State private var selectedSong: MusicSong?
     @State private var isSearching = false
     @State private var testSongName = ""
+    @State private var testPlatform = "tx"
     @State private var testArtist = ""
     @State private var isResolving = false
     @State private var activeHost: LXSourceScriptHost?
@@ -59,17 +60,30 @@ struct LXSourceTestPanel: View {
                         .font(.caption).foregroundStyle(.secondary)
                     Button("从文件导入 .js 音源") { isImporterPresented = true }
                 }
-                Section("QQ 歌曲搜索与试听") {
+                Section("多平台歌曲搜索与试听") {
+                    Picker("平台", selection: $testPlatform) {
+                        Text("QQ").tag("tx")
+                        Text("网易").tag("wy")
+                        Text("酷我").tag("kw")
+                        Text("酷狗").tag("kg")
+                    }
+                    .onChange(of: testPlatform) { _, _ in
+                        searchResults = []
+                        selectedSong = nil
+                        previewPlayer?.pause()
+                        previewPlayer = nil
+                        previewURL = nil
+                    }
                     TextField("歌曲名称", text: $testSongName)
                     TextField("歌手名称（可选）", text: $testArtist)
-                    Button(isSearching ? "搜索中…" : "搜索 QQ 歌曲") {
-                        Task { await searchQQ() }
+                    Button(isSearching ? "搜索中…" : "搜索歌曲") {
+                        Task { await searchPlatform() }
                     }
                     .disabled(isSearching || testSongName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     ForEach(searchResults) { song in
                         Button {
                             selectedSong = song
-                            Task { await resolveSelectedQQ() }
+                            Task { await resolveSelectedSong() }
                         } label: {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(song.title)
@@ -82,7 +96,7 @@ struct LXSourceTestPanel: View {
                     if previewURL != nil {
                         Button(previewPlayer == nil ? "试听解析结果" : "停止试听") { togglePreview() }
                     }
-                    Text("搜索并选择歌曲后自动取链，无需填写 songmid。")
+                    Text("选择平台后搜索并取链。搜索仍使用现有服务，尚未移植洛雪原生搜索模块。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 if let message {
@@ -137,7 +151,7 @@ struct LXSourceTestPanel: View {
     }
 
     @MainActor
-    private func searchQQ() async {
+    private func searchPlatform() async {
         isSearching = true
         defer { isSearching = false }
         selectedSong = nil
@@ -148,27 +162,32 @@ struct LXSourceTestPanel: View {
         do {
             let query = [testSongName, testArtist].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: " ")
             let service = GDStudioMusicSearchService()
+            let platform: MusicSource
+            switch testPlatform {
+            case "wy": platform = .netease
+            case "kw": platform = .kuwo
+            case "kg": platform = .kugou
+            default: platform = .qq
+            }
             let songs: [MusicSong]
-            do {
-                songs = try await service.searchQQSongsNative(keyword: query, count: 20)
-            } catch {
-                let nativeError = error.localizedDescription
+            if testPlatform == "tx" {
                 do {
-                    songs = try await service.search(keyword: query, source: .qq, count: 20)
+                    songs = try await service.searchQQSongsNative(keyword: query, count: 20)
                 } catch {
-                    message = "QQ 原生搜索失败：\(nativeError)；备用搜索失败：\(error.localizedDescription)"
-                    return
+                    songs = try await service.search(keyword: query, source: platform, count: 20)
                 }
+            } else {
+                songs = try await service.search(keyword: query, source: platform, count: 20)
             }
             searchResults = songs
-            message = songs.isEmpty ? "QQ 搜索未找到歌曲，请尝试只输入歌名。" : "找到 \(songs.count) 首歌曲，点击对应歌曲开始解析。"
+            message = songs.isEmpty ? "当前平台未找到歌曲，请尝试只输入歌名。" : "找到 \(songs.count) 首歌曲，点击对应歌曲开始解析。"
         } catch {
-            message = "QQ 搜索失败：\(error.localizedDescription)"
+            message = "歌曲搜索失败：\(error.localizedDescription)"
         }
     }
 
     @MainActor
-    private func resolveSelectedQQ() async {
+    private func resolveSelectedSong() async {
         guard let id = selectedID, let song = selectedSong else { return }
         isResolving = true
         previewPlayer?.pause()
@@ -188,7 +207,7 @@ struct LXSourceTestPanel: View {
                 "interval": Int(song.duration ?? 0),
                 "hash": song.hash ?? song.sourceID
             ]
-            let url = try await host.resolve(source: "tx", musicInfo: info, quality: "320k", timeout: 20)
+            let url = try await host.resolve(source: testPlatform, musicInfo: info, quality: "320k", timeout: 20)
             previewPlayer?.pause()
             previewPlayer = nil
             previewURL = url
