@@ -47,12 +47,23 @@ final class LXSourceLibrary {
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw LibraryError.emptyScript
         }
+        return try importScript(data: data, filename: filename)
+    }
+
+    @discardableResult
+    func importScript(data: Data, filename: String) throws -> Script {
+        guard filename.lowercased().hasSuffix(".js") else { throw LibraryError.invalidFile }
+        guard data.count <= maximumSize else { throw LibraryError.tooLarge }
+        guard let text = String(data: data, encoding: .utf8),
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw LibraryError.emptyScript
+        }
         let id = UUID().uuidString.lowercased()
         let target = directory.appendingPathComponent(id).appendingPathExtension("js")
         try data.write(to: target, options: .atomic)
-        try Data(file.lastPathComponent.utf8).write(to: directory.appendingPathComponent(id).appendingPathExtension("name"), options: .atomic)
+        try Data(filename.utf8).write(to: directory.appendingPathComponent(id).appendingPathExtension("name"), options: .atomic)
         if selectedID == nil { selectedID = id }
-        return Script(id: id, filename: file.lastPathComponent, contents: text)
+        return Script(id: id, filename: filename, contents: text)
     }
 
     func listIdentifiers() throws -> [String] {
