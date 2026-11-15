@@ -47,6 +47,14 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
+      - name: Smoke test LX JavaScriptCore bridge on macOS
+        run: |
+          swiftc -framework JavaScriptCore \\
+            MusicX/ResourceEngine/LXCompatibility/LXSourceScriptHost.swift \\
+            scripts/test-lx-bridge.swift \\
+            -o /tmp/test-lx-bridge
+          /tmp/test-lx-bridge
+
       - name: Archive for physical iOS devices (unsigned)
         run: |
           xcodebuild \
