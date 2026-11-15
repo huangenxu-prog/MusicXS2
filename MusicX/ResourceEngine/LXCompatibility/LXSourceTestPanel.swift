@@ -143,12 +143,23 @@ struct LXSourceTestPanel: View {
     }
 
     private func inspect(id: String) {
+        Task { @MainActor in
         do {
             let text = try getLibrary().load(id: id)
             let host = try LXSourceScriptHost(script: text)
+            activeHost = host
+            message = "正在等待音源注册（最多 8 秒）…"
+            let ready = await host.awaitRegistration(timeout: 8)
             let platforms = host.registeredSources.keys.sorted()
-            message = platforms.isEmpty ? "脚本已加载，但未注册音源。" : "初始化完成，已注册：\(platforms.joined(separator: ", "))。未进行真实取链测试。"
-        } catch { message = "脚本检查失败：\(error.localizedDescription)" }
+            let events = host.initializationEvents.suffix(8).joined(separator: "；")
+            if ready {
+                message = "初始化完成，已注册：\(platforms.joined(separator: ", "))。事件：\(events)"
+            } else {
+                message = "脚本加载完成，但 8 秒内未注册音源。收到 inited：\(host.didReceiveInitialization)；JS 错误：\(host.lastError ?? "无")；事件：\(events.isEmpty ? "无" : events)"
+            }
+            activeHost = nil
+        } catch { message = "脚本检查失败：\(error.localizedDescription)"; activeHost = nil }
+        }
     }
 
     @MainActor
