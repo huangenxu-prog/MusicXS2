@@ -213,6 +213,7 @@ struct ContentView: View {
     @State private var discoveryRoute: MusicDiscoveryRoute?
     @State private var isDiscoveryPopping = false
     @State private var isSettingsAlertPresented = false
+    @State private var isLXSourceTestPresented = false
 
     private var filteredSongs: [AppSong] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -854,6 +855,22 @@ struct ContentView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("搜索音乐")
+                    Button {
+                        isLXSourceTestPresented = true
+                    } label: {
+                        Image(systemName: "puzzlepiece.extension")
+                            .font(.system(size: 19, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.92))
+                            .frame(width: 44, height: 44)
+                            .background(Color(red: 0.075, green: 0.09, blue: 0.17), in: Circle())
+                            .overlay(Circle().stroke(Color(red: 0.19, green: 0.23, blue: 0.43), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("音源测试")
+                    .sheet(isPresented: $isLXSourceTestPresented) {
+                        LXSourceTestPanel()
+                            .preferredColorScheme(.dark)
+                    }
                 }
 
                 HStack(spacing: 8) {
