@@ -142,21 +142,29 @@ struct MusicResourceEngine {
         quality: MusicQuality,
         excludingProviderIDs: Set<String> = []
     ) async throws -> ResolvedMusicResource {
-        // Temporary source policy: NetEase only.
-        // 1) Official NetEase playback URL (free/original resource).
-        // 2) Kumone pyncmd for tracks whose official URL is unavailable (e.g. VIP).
-        // 3) Strictly matched Kugou, then Kuwo fallback.
-        // All other catalogs and the legacy cross-platform resolver are disabled.
-        guard song.source == .netease else {
-            throw MusicSourceError.unsupportedSource(song.source)
+        // Native source first, then cross-platform matching. Never reject QQ
+        // catalog tracks before the registered QQ providers can resolve them.
+        let providers: [(provider: any MusicResourceProvider, tier: Int, baseline: Int)]
+        switch song.source {
+        case .qq:
+            providers = [
+                (QQGDStudioAudioProvider(session: session), 0, 1_000),
+                (QQChkszAudioProvider(session: session), 1, 900),
+                (MusicXLegacySupplierLibrary(session: session), 2, 100)
+            ]
+        case .netease:
+            providers = [
+                (NetEaseNativeAudioProvider(session: session), 0, 1_000),
+                (KumonePyncmdAudioSourceProvider(), 1, 100),
+                (MusicXLegacySupplierLibrary(session: session), 2, 90),
+                (KumoneKugouAudioSourceProvider(session: session), 3, 80),
+                (KumoneKuwoAudioSourceProvider(), 4, 70)
+            ]
+        default:
+            providers = [
+                (MusicXLegacySupplierLibrary(session: session), 0, 100)
+            ]
         }
-
-        let providers: [(provider: any MusicResourceProvider, tier: Int, baseline: Int)] = [
-            (NetEaseNativeAudioProvider(session: session), 0, 1_000),
-            (KumonePyncmdAudioSourceProvider(), 1, 100),
-            (KumoneKugouAudioSourceProvider(session: session), 2, 80),
-            (KumoneKuwoAudioSourceProvider(), 3, 70)
-        ]
 
         var failures: [String] = []
         for entry in providers {
