@@ -162,12 +162,12 @@ struct PlatformCollectionCatalog {
                         title: row["name"] as? String ?? "未知歌曲",
                         artist: artists.isEmpty ? "未知歌手" : artists,
                         album: album["name"] as? String,
-                        artworkURL: albumMID.flatMap { URL(string: "https://y.gtimg.cn/music/photo_new/T002R300x300M000\\($0).jpg") },
+                        artworkURL: albumMID.flatMap { URL(string: "https://y.gtimg.cn/music/photo_new/T002R300x300M000\($0).jpg") },
                         duration: (row["interval"] as? Double) ?? (row["interval"] as? Int).map(Double.init),
                         hash: nil, albumID: albumMID, pictureID: albumMID, lyricID: mid))
                 }
                 begin += rows.count
-                if rows.count < min(50, count - songs.count + rows.count) { break }
+                if rows.count < 50 { break }
             }
             guard !songs.isEmpty else { throw MusicSourceError.invalidResponse("QQ 合集没有返回歌曲") }
             var seen = Set<String>()
