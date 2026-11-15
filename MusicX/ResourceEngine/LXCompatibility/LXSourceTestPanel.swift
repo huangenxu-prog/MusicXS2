@@ -182,11 +182,8 @@ struct LXSourceTestPanel: View {
             }
             let songs: [MusicSong]
             if testPlatform == "tx" {
-                do {
-                    songs = try await service.searchQQSongsNative(keyword: query, count: 20)
-                } catch {
-                    songs = try await service.search(keyword: query, source: platform, count: 20)
-                }
+                // Do not mask signed-search errors with the unsupported GDStudio QQ source.
+                songs = try await service.searchQQSongsNative(keyword: query, count: 20)
             } else if testPlatform == "kg" {
                 songs = try await service.searchKugouNative(keyword: query, count: 20)
             } else if testPlatform == "kw" {
@@ -220,7 +217,8 @@ struct LXSourceTestPanel: View {
                 "singer": song.artist,
                 "albumName": song.album ?? "",
                 "interval": Int(song.duration ?? 0),
-                "hash": song.hash ?? song.sourceID
+                "hash": song.hash ?? song.sourceID,
+                "albumId": song.albumID ?? ""
             ]
             let url = try await host.resolve(source: testPlatform, musicInfo: info, quality: "320k", timeout: 20)
             stopPreview()
