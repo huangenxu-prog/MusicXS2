@@ -88,6 +88,93 @@ struct PlatformCollectionCatalog {
         return collections
     }
 
+    /// First QQ collection feeds Daily Recommendations; first NetEase collection
+    /// can feed Featured Songs. Keep platform ordering instead of hard-coded IDs.
+    func firstCollectionSongs(provider: PlatformCollection.Provider, count: Int = 50) async throws -> [MusicSong] {
+        let collections = try await (provider == .qq ? qqRecommendations() : neteaseRecommendations())
+        guard let first = collections.first else {
+            throw MusicSourceError.invalidResponse("平台没有返回推荐合集")
+        }
+        return try await tracks(for: first, count: count)
+    }
+
+    func tracks(for collection: PlatformCollection, count: Int = 50) async throws -> [MusicSong] {
+        guard count > 0 else { return [] }
+        switch collection.provider {
+        case .netease:
+            var components = URLComponents(string: "https://music.163.com/api/playlist/detail")!
+            components.queryItems = [URLQueryItem(name: "id", value: collection.sourceID)]
+            var request = URLRequest(url: components.url!)
+            request.setValue("https://music.163.com/", forHTTPHeaderField: "Referer")
+            let root = try await json(for: request)
+            let detail = root["result"] as? [String: Any] ?? root["playlist"] as? [String: Any] ?? [:]
+            let rows = detail["tracks"] as? [[String: Any]] ?? []
+            let songs = rows.prefix(count).compactMap { row -> MusicSong? in
+                guard let id = row["id"] else { return nil }
+                let artists = (row["ar"] as? [[String: Any]] ?? row["artists"] as? [[String: Any]] ?? [])
+                    .compactMap { $0["name"] as? String }.joined(separator: " / ")
+                let album = row["al"] as? [String: Any] ?? row["album"] as? [String: Any] ?? [:]
+                return MusicSong(source: .netease, sourceID: String(describing: id),
+                    title: row["name"] as? String ?? "未知歌曲",
+                    artist: artists.isEmpty ? "未知歌手" : artists,
+                    album: album["name"] as? String,
+                    artworkURL: (album["picUrl"] as? String).flatMap(URL.init(string:)),
+                    duration: (row["dt"] as? Double).map { $0 / 1000 },
+                    hash: nil, albumID: album["id"].map { String(describing: $0) },
+                    pictureID: nil, lyricID: String(describing: id))
+            }
+            guard !songs.isEmpty else { throw MusicSourceError.invalidResponse("网易云合集没有返回歌曲") }
+            return songs
+        case .qq:
+            guard let playlistID = Int(collection.sourceID), playlistID > 0 else {
+                throw MusicSourceError.invalidResponse("QQ 合集编号无效")
+            }
+            var songs: [MusicSong] = []
+            var begin = 0
+            while songs.count < count {
+                try Task.checkCancellation()
+                let body: [String: Any] = [
+                    "req_0": [
+                        "module": "music.srfDissInfo.aiDissInfo",
+                        "method": "uniform_get_Dissinfo",
+                        "param": ["disstid": playlistID, "song_begin": begin,
+                                  "song_num": min(50, count - songs.count)]
+                    ],
+                    "comm": ["uin": "0", "format": "json", "ct": 24, "cv": 0]
+                ]
+                var request = URLRequest(url: URL(string: "https://u.y.qq.com/cgi-bin/musicu.fcg")!)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.setValue("https://y.qq.com/", forHTTPHeaderField: "Referer")
+                request.httpBody = try JSONSerialization.data(withJSONObject: body)
+                let root = try await json(for: request)
+                let envelope = root["req_0"] as? [String: Any] ?? [:]
+                let data = envelope["data"] as? [String: Any] ?? [:]
+                let rows = data["songlist"] as? [[String: Any]] ?? []
+                if rows.isEmpty { break }
+                for row in rows {
+                    guard let mid = row["mid"] as? String, !mid.isEmpty else { continue }
+                    let artists = (row["singer"] as? [[String: Any]] ?? [])
+                        .compactMap { $0["name"] as? String }.joined(separator: " / ")
+                    let album = row["album"] as? [String: Any] ?? [:]
+                    let albumMID = album["mid"] as? String
+                    songs.append(MusicSong(source: .qq, sourceID: mid,
+                        title: row["name"] as? String ?? "未知歌曲",
+                        artist: artists.isEmpty ? "未知歌手" : artists,
+                        album: album["name"] as? String,
+                        artworkURL: albumMID.flatMap { URL(string: "https://y.gtimg.cn/music/photo_new/T002R300x300M000\\($0).jpg") },
+                        duration: (row["interval"] as? Double) ?? (row["interval"] as? Int).map(Double.init),
+                        hash: nil, albumID: albumMID, pictureID: albumMID, lyricID: mid))
+                }
+                begin += rows.count
+                if rows.count < min(50, count - songs.count + rows.count) { break }
+            }
+            guard !songs.isEmpty else { throw MusicSourceError.invalidResponse("QQ 合集没有返回歌曲") }
+            var seen = Set<String>()
+            return songs.filter { seen.insert($0.id).inserted }.prefix(count).map { $0 }
+        }
+    }
+
     private func json(for request: URLRequest) async throws -> [String: Any] {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse,
