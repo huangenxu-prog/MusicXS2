@@ -79,7 +79,16 @@ struct GDStudioMusicSearchService {
             do {
                 let (data, response) = try await session.data(for: endpointRequest)
                 guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                    lastRequestError = MusicSourceError.invalidResponse("搜索 HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1)")
+                    let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+                    // A 400 is an upstream search API failure, not an LX JS parsing failure.
+                    // Preserve a short, redacted response preview for troubleshooting.
+                    let preview = String(data: data.prefix(512), encoding: .utf8)?
+                        .replacingOccurrences(of: #"(?i)(token|apikey|api_key|secret|password)["\\s:=]+[^,"\\s}]+"#,
+                                              with: "$1=[redacted]", options: .regularExpression)
+                        .replacingOccurrences(of: "\\n", with: " ")
+                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    let detail = preview.isEmpty ? "" : "；响应：\(preview)"
+                    lastRequestError = MusicSourceError.invalidResponse("搜索 HTTP \(status)（\(source.rawValue)）\(detail)")
                     continue
                 }
                 responseData = data
