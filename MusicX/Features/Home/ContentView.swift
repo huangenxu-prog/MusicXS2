@@ -1726,8 +1726,7 @@ struct ContentView: View {
         let service = GDStudioMusicSearchService()
         async let netease = try? service.search(keyword: keyword, source: .netease, count: 50)
         async let qq = try? service.search(keyword: keyword, source: .qq, count: 50)
-        async let kuwo = try? service.search(keyword: keyword, source: .kuwo, count: 50)
-        let sourceResults = [await netease ?? [], await qq ?? [], await kuwo ?? []]
+        let sourceResults = [await netease ?? [], await qq ?? []]
         // Interleave only providers with an implemented playback resolver.
         var merged: [MusicSong] = []
         let maxCount = sourceResults.map(\.count).max() ?? 0
