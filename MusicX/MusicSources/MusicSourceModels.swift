@@ -1,6 +1,6 @@
 import Foundation
 
-enum MusicSource: String, Codable, CaseIterable, Identifiable {
+enum MusicSource: String, Codable, CaseIterable, Identifiable, Sendable {
     case netease = "wy"
     case qq = "tx"
     case kuwo = "kw"
@@ -28,7 +28,7 @@ enum MusicSource: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-enum MusicQuality: String, CaseIterable, Identifiable {
+enum MusicQuality: String, CaseIterable, Identifiable, Sendable {
     case standard = "128k"
     case high = "320k"
     case lossless = "flac"
@@ -55,8 +55,31 @@ enum MusicQuality: String, CaseIterable, Identifiable {
     }
 }
 
+/// Describes why a collection appeared in a platform catalog. Search results are
+/// deliberately distinct from editorial or platform-recommended collections.
+enum MusicPlaylistProvenance: String, Codable, Hashable, Sendable {
+    case officialEditorial
+    case platformRecommended
+    case categoryFeatured
+    case searchResult
+}
+
+/// A playlist returned by a provider. Playlist IDs are provider-specific.
+struct MusicPlaylist: Identifiable, Codable, Hashable, Sendable {
+    let source: MusicSource
+    let sourceID: String
+    let name: String
+    let creator: String?
+    let description: String?
+    let artworkURL: URL?
+    let trackCount: Int?
+    var provenance: MusicPlaylistProvenance? = nil
+
+    var id: String { "\(source.rawValue):playlist:\(sourceID)" }
+}
+
 /// IDs are source-specific. Never pass a QQ mid to a NetEase resolver.
-struct MusicSong: Identifiable, Codable, Hashable {
+struct MusicSong: Identifiable, Codable, Hashable, Sendable {
     var id: String { "\(source.rawValue):\(sourceID)" }
 
     let source: MusicSource
@@ -70,6 +93,7 @@ struct MusicSong: Identifiable, Codable, Hashable {
     var albumID: String?
     var pictureID: String?
     var lyricID: String?
+    var copyrightID: String? = nil
 }
 
 enum MusicSourceError: LocalizedError {
