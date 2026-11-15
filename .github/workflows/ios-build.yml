@@ -70,6 +70,7 @@ jobs:
         run: |
           /usr/libexec/PlistBuddy -c 'Print :UIBackgroundModes' build/MusicX.xcarchive/Products/Applications/MusicX.app/Info.plist
           /usr/libexec/PlistBuddy -c 'Print :UIBackgroundModes:0' build/MusicX.xcarchive/Products/Applications/MusicX.app/Info.plist | grep -qx audio
+          /usr/libexec/PlistBuddy -c 'Print :NSAppTransportSecurity:NSExceptionDomains:yinyue.haitangw.net:NSExceptionAllowsInsecureHTTPLoads' build/MusicX.xcarchive/Products/Applications/MusicX.app/Info.plist | grep -qx true
 
       - name: Package unsigned IPA
         run: |
