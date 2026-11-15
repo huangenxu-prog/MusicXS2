@@ -488,6 +488,8 @@ struct MusicDiscoveryPage: View {
         do {
             let result: [MusicSong]
             switch route {
+            case .daily:
+                result = try await PlatformCollectionCatalog().firstCollectionSongs(provider: .qq, count: 50)
             case .charts:
                 result = try await service.toplist("热歌榜", count: 50)
             case .chart(let name):
