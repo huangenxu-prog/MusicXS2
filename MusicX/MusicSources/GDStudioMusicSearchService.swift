@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 struct GDStudioMusicSearchService {
     private let session: URLSession
@@ -432,56 +433,104 @@ struct GDStudioMusicSearchService {
         }
     }
 
-    /// Native QQ song search for LX diagnostics; independent of the GDStudio proxy.
+    /// LX-compatible signed QQ desktop search; returns native song MID metadata.
     func searchQQSongsNative(keyword: String, count: Int = 20) async throws -> [MusicSong] {
         let query = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return [] }
-        let data = try await requestQQMusicU(
-            module: "music.search.SearchCgiService",
-            method: "DoSearchForQQMusicDesktop",
-            parameters: [
-                "query": query,
-                "num_per_page": min(max(count, 1), 30),
-                "page_num": 1,
-                "search_type": 0
+        let searchID = UUID().uuidString.replacingOccurrences(of: "-", with: "").uppercased() + "00001"
+        let payload: [String: Any] = [
+            "comm": [
+                "_channelid": "0", "_os_version": "6.2.9200-2",
+                "ct": "19", "cv": "2151",
+                "guid": "1F70E520B2EAA7D25E11760783C53CA9",
+                "patch": "118", "psrf_access_token_expiresAt": 0,
+                "psrf_qqaccess_token": "", "psrf_qqopenid": "",
+                "psrf_qqunionid": "", "tmeAppID": "qqmusic",
+                "tmeLoginType": 0, "uin": "0",
+                "wid": "7223299733393904640"
+            ],
+            "music.search.SearchCgiService": [
+                "module": "music.search.SearchCgiService",
+                "method": "DoSearchForQQMusicDesktop",
+                "param": [
+                    "grp": 1, "num_per_page": min(max(count, 1), 30),
+                    "page_num": 1, "query": query,
+                    "remoteplace": "txt.newclient.top",
+                    "search_type": 0, "searchid": searchID
+                ]
             ]
-        )
-        let body = data["body"] as? [String: Any] ?? [:]
-        let songContainer = body["song"] as? [String: Any] ?? [:]
-        let songlistContainer = body["songlist"] as? [String: Any] ?? [:]
-        let candidates: [[[String: Any]]] = [
-            songContainer["list"] as? [[String: Any]] ?? [],
-            songlistContainer["list"] as? [[String: Any]] ?? [],
-            body["songlist"] as? [[String: Any]] ?? [],
-            body["list"] as? [[String: Any]] ?? []
         ]
-        let rows = candidates.first(where: { !$0.isEmpty }) ?? []
-        if rows.isEmpty {
-            let counts = candidates.map { String($0.count) }.joined(separator: ",")
-            throw MusicSourceError.invalidResponse("QQ 搜索列表为空；各候选列表数量=[\(counts)]")
+        // Sign exactly the bytes sent to QQ. JSONSerialization's sortedKeys
+        // ensures deterministic order for the signature and request body.
+        let bodyData = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys, .fragmentsAllowed])
+        let signature = Self.qqZZCSignature(for: bodyData)
+        guard let url = URL(string: "https://u.y.qq.com/cgi-bin/musics.fcg?sign=\(signature)") else {
+            throw MusicSourceError.invalidResponse("QQ 搜索接口地址无效")
         }
-        let parsed = rows.compactMap { row -> MusicSong? in
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = bodyData
+        request.timeoutInterval = 15
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("QQMusic 14090508(android 12)", forHTTPHeaderField: "User-Agent")
+        let (responseData, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw MusicSourceError.invalidResponse("QQ 签名搜索 HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1)")
+        }
+        guard let root = try JSONSerialization.jsonObject(with: responseData) as? [String: Any] else {
+            throw MusicSourceError.invalidResponse("QQ 签名搜索响应非 JSON 对象")
+        }
+        let service = (root["music.search.SearchCgiService"] as? [String: Any])
+            ?? (root["req"] as? [String: Any]) ?? [:]
+        let topCode = (root["code"] as? NSNumber)?.intValue ?? -1
+        let serviceCode = (service["code"] as? NSNumber)?.intValue ?? -1
+        guard topCode == 0, serviceCode == 0,
+              let data = service["data"] as? [String: Any] else {
+            throw MusicSourceError.invalidResponse("QQ 签名搜索状态异常 top=\(topCode), service=\(serviceCode)")
+        }
+        let body = data["body"] as? [String: Any] ?? [:]
+        let songs = body["song"] as? [String: Any] ?? [:]
+        let rows = songs["list"] as? [[String: Any]] ?? []
+        guard !rows.isEmpty else {
+            throw MusicSourceError.invalidResponse("QQ 签名搜索未返回歌曲")
+        }
+        let result: [MusicSong] = rows.compactMap { row in
             guard let mid = (row["mid"] as? String) ?? (row["songmid"] as? String),
                   !mid.isEmpty else { return nil }
             let singers = (row["singer"] as? [[String: Any]])?
-                .compactMap { $0["name"] as? String }.joined(separator: " / ")
-            let albumObject = row["album"] as? [String: Any]
-            let interval = (row["interval"] as? NSNumber)?.doubleValue
+                .compactMap { $0["name"] as? String }.joined(separator: " / ") ?? ""
+            let album = row["album"] as? [String: Any] ?? [:]
+            let duration = (row["interval"] as? NSNumber)?.doubleValue
             return MusicSong(
                 source: .qq, sourceID: mid,
-                title: (row["name"] as? String) ?? (row["songname"] as? String) ?? "",
-                artist: singers ?? (row["singer"] as? String) ?? "",
-                album: albumObject?["name"] as? String ?? row["albumname"] as? String,
-                artworkURL: nil, duration: interval, hash: nil,
-                albumID: albumObject?["mid"] as? String,
-                pictureID: nil, lyricID: nil
+                title: (row["title"] as? String) ?? (row["name"] as? String) ?? "",
+                artist: singers, album: album["name"] as? String,
+                artworkURL: nil, duration: duration, hash: nil,
+                albumID: album["mid"] as? String, pictureID: nil, lyricID: nil
             )
         }
-        if parsed.isEmpty {
-            let fields = rows.first.map { $0.keys.sorted().joined(separator: ",") } ?? ""
-            throw MusicSourceError.invalidResponse("QQ 搜索返回 \(rows.count) 条，但无法提取 MID；首条字段=[\(fields)]")
+        guard !result.isEmpty else {
+            throw MusicSourceError.invalidResponse("QQ 签名搜索歌曲缺少 MID")
         }
-        return parsed
+        return result
+    }
+
+    private static func qqZZCSignature(for data: Data) -> String {
+        let hash = Insecure.SHA1.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let chars = Array(hash)
+        let first = [23, 14, 6, 36, 16, 40, 7, 19].map { String(chars[$0]) }.joined()
+        let last = [16, 1, 32, 12, 19, 27, 8, 5].map { String(chars[$0]) }.joined()
+        let scramble = [89, 39, 179, 150, 218, 82, 58, 252, 177, 52,
+                        186, 123, 120, 64, 242, 133, 143, 161, 121, 179]
+        let bytes: [UInt8] = scramble.enumerated().map { index, value in
+            let begin = hash.index(hash.startIndex, offsetBy: index * 2)
+            let end = hash.index(begin, offsetBy: 2)
+            let byte = UInt8(hash[begin..<end], radix: 16) ?? 0
+            return UInt8(value) ^ byte
+        }
+        let middle = Data(bytes).base64EncodedString()
+            .filter { $0 != "/" && $0 != "+" && $0 != "=" }
+        return ("zzc" + first + middle + last).lowercased()
     }
 
     /// Searches QQ Music's real playlist index and returns provider-native playlist metadata.
