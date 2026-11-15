@@ -10,7 +10,9 @@ struct LXSourceTestPanel: View {
     @State private var message: String?
     @State private var selectedID: String?
     @State private var library: LXSourceLibrary?
-    @State private var testSongMID = ""
+    @State private var searchResults: [MusicSong] = []
+    @State private var selectedSong: MusicSong?
+    @State private var isSearching = false
     @State private var testSongName = ""
     @State private var testArtist = ""
     @State private var isResolving = false
@@ -57,20 +59,30 @@ struct LXSourceTestPanel: View {
                         .font(.caption).foregroundStyle(.secondary)
                     Button("从文件导入 .js 音源") { isImporterPresented = true }
                 }
-                Section("QQ 真实取链测试") {
-                    TextField("QQ songmid（必填）", text: $testSongMID)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    TextField("歌曲名称（可选）", text: $testSongName)
+                Section("QQ 歌曲搜索与试听") {
+                    TextField("歌曲名称", text: $testSongName)
                     TextField("歌手名称（可选）", text: $testArtist)
-                    Button(isResolving ? "正在解析…" : "用当前音源测试 QQ 取链") {
-                        Task { await resolveSelectedQQ() }
+                    Button(isSearching ? "搜索中…" : "搜索 QQ 歌曲") {
+                        Task { await searchQQ() }
                     }
-                    .disabled(isResolving || selectedID == nil || testSongMID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(isSearching || testSongName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    ForEach(searchResults) { song in
+                        Button {
+                            selectedSong = song
+                            Task { await resolveSelectedQQ() }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(song.title)
+                                Text(song.artist).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        .disabled(isResolving || selectedID == nil)
+                    }
+                    if isResolving { ProgressView("正在解析选中的歌曲…") }
                     if previewURL != nil {
                         Button(previewPlayer == nil ? "试听解析结果" : "停止试听") { togglePreview() }
                     }
-                    Text("先解析 URL，再手动试听。部分音源可能要求授权或返回地区限制。")
+                    Text("搜索并选择歌曲后自动取链，无需填写 songmid。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 if let message {
@@ -125,8 +137,27 @@ struct LXSourceTestPanel: View {
     }
 
     @MainActor
+    private func searchQQ() async {
+        isSearching = true
+        defer { isSearching = false }
+        selectedSong = nil
+        searchResults = []
+        previewPlayer?.pause()
+        previewPlayer = nil
+        previewURL = nil
+        do {
+            let query = [testSongName, testArtist].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: " ")
+            let songs = try await GDStudioMusicSearchService().search(keyword: query, source: .qq, count: 20)
+            searchResults = songs
+            message = songs.isEmpty ? "QQ 搜索未找到歌曲，请尝试只输入歌名。" : "找到 \(songs.count) 首歌曲，点击对应歌曲开始解析。"
+        } catch {
+            message = "QQ 搜索失败：\(error.localizedDescription)"
+        }
+    }
+
+    @MainActor
     private func resolveSelectedQQ() async {
-        guard let id = selectedID else { return }
+        guard let id = selectedID, let song = selectedSong else { return }
         isResolving = true
         previewPlayer?.pause()
         previewPlayer = nil
@@ -137,9 +168,13 @@ struct LXSourceTestPanel: View {
             let host = try LXSourceScriptHost(script: script)
             activeHost = host
             let info: [String: Any] = [
-                "songmid": testSongMID.trimmingCharacters(in: .whitespacesAndNewlines),
-                "name": testSongName,
-                "singer": testArtist
+                "songmid": song.sourceID,
+                "id": song.sourceID,
+                "name": song.title,
+                "singer": song.artist,
+                "albumName": song.album ?? "",
+                "interval": Int(song.duration ?? 0),
+                "hash": song.hash ?? song.sourceID
             ]
             let url = try await host.resolve(source: "tx", musicInfo: info, quality: "320k", timeout: 20)
             previewPlayer?.pause()
