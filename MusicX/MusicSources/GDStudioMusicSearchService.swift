@@ -83,9 +83,9 @@ struct GDStudioMusicSearchService {
                     // A 400 is an upstream search API failure, not an LX JS parsing failure.
                     // Preserve a short, redacted response preview for troubleshooting.
                     let preview = String(data: data.prefix(512), encoding: .utf8)?
-                        .replacingOccurrences(of: #"(?i)(token|apikey|api_key|secret|password)["\\s:=]+[^,"\\s}]+"#,
+                        .replacingOccurrences(of: #"(?i)(token|apikey|api_key|secret|password)["\s:=]+[^,"\s}]+"#,
                                               with: "$1=[redacted]", options: .regularExpression)
-                        .replacingOccurrences(of: "\\n", with: " ")
+                        .replacingOccurrences(of: "\n", with: " ")
                         .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                     let detail = preview.isEmpty ? "" : "；响应：\(preview)"
                     lastRequestError = MusicSourceError.invalidResponse("搜索 HTTP \(status)（\(source.rawValue)）\(detail)")
