@@ -518,7 +518,7 @@ struct GDStudioMusicSearchService {
     private static func qqZZCSignature(for data: Data) -> String {
         let hash = Insecure.SHA1.hash(data: data).map { String(format: "%02x", $0) }.joined()
         let chars = Array(hash)
-        let first = [23, 14, 6, 36, 16, 40, 7, 19].map { $0 < chars.count ? String(chars[$0]) : "" }.joined()
+        let first = [23, 14, 6, 36, 16, 40, 7, 19].map { $0 < chars.count ? String(chars[$0]) : "undefined" }.joined()
         let last = [16, 1, 32, 12, 19, 27, 8, 5].map { String(chars[$0]) }.joined()
         let scramble = [89, 39, 179, 150, 218, 82, 58, 252, 177, 52,
                         186, 123, 120, 64, 242, 133, 143, 161, 121, 179]
