@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 import UniformTypeIdentifiers
 
 /// Temporary test-only UI. Does not affect the normal music resource scheduler.
@@ -14,6 +15,8 @@ struct LXSourceTestPanel: View {
     @State private var testArtist = ""
     @State private var isResolving = false
     @State private var activeHost: LXSourceScriptHost?
+    @State private var previewPlayer: AVPlayer?
+    @State private var previewURL: URL?
 
     var body: some View {
         NavigationStack {
@@ -64,7 +67,10 @@ struct LXSourceTestPanel: View {
                         Task { await resolveSelectedQQ() }
                     }
                     .disabled(isResolving || selectedID == nil || testSongMID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    Text("只请求播放地址，不启动播放。部分音源可能要求授权或返回地区限制。")
+                    if previewURL != nil {
+                        Button(previewPlayer == nil ? "试听解析结果" : "停止试听") { togglePreview() }
+                    }
+                    Text("先解析 URL，再手动试听。部分音源可能要求授权或返回地区限制。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 if let message {
@@ -88,6 +94,7 @@ struct LXSourceTestPanel: View {
                 } catch { message = "导入失败：\(error.localizedDescription)" }
             }
             .onAppear { reload() }
+            .onDisappear { previewPlayer?.pause(); previewPlayer = nil }
         }
     }
 
@@ -121,6 +128,9 @@ struct LXSourceTestPanel: View {
     private func resolveSelectedQQ() async {
         guard let id = selectedID else { return }
         isResolving = true
+        previewPlayer?.pause()
+        previewPlayer = nil
+        previewURL = nil
         defer { isResolving = false; activeHost = nil }
         do {
             let script = try getLibrary().load(id: id)
@@ -132,10 +142,28 @@ struct LXSourceTestPanel: View {
                 "singer": testArtist
             ]
             let url = try await host.resolve(source: "tx", musicInfo: info, quality: "320k", timeout: 20)
-            message = "解析成功（仅获得 URL，未验证音频可播放）：\(url.absoluteString)"
+            previewPlayer?.pause()
+            previewPlayer = nil
+            previewURL = url
+            message = "解析成功，已取得 URL。点击试听验证播放：\(url.absoluteString)"
         } catch {
             message = "真实取链失败：\(error.localizedDescription)"
         }
+    }
+
+    @MainActor
+    private func togglePreview() {
+        if let previewPlayer {
+            previewPlayer.pause()
+            self.previewPlayer = nil
+            message = "已停止试听。"
+            return
+        }
+        guard let previewURL else { return }
+        let player = AVPlayer(url: previewURL)
+        previewPlayer = player
+        player.play()
+        message = "已发起试听，请确认是否听到声音。无声音不能视为验证通过。"
     }
 
     private func delete(at offsets: IndexSet) {
