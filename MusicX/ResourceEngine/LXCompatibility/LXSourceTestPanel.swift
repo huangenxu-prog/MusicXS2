@@ -20,6 +20,7 @@ struct LXSourceTestPanel: View {
     @State private var activeHost: LXSourceScriptHost?
     @State private var previewPlayer: AVPlayer?
     @State private var previewURL: URL?
+    @State private var previewDiagnosticTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -120,7 +121,7 @@ struct LXSourceTestPanel: View {
                 } catch { message = "导入失败：\(error.localizedDescription)" }
             }
             .onAppear { reload() }
-            .onDisappear { previewPlayer?.pause(); previewPlayer = nil }
+            .onDisappear { stopPreview() }
         }
     }
 
@@ -156,8 +157,7 @@ struct LXSourceTestPanel: View {
         defer { isSearching = false }
         selectedSong = nil
         searchResults = []
-        previewPlayer?.pause()
-        previewPlayer = nil
+        stopPreview()
         previewURL = nil
         do {
             let query = [testSongName, testArtist].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: " ")
@@ -208,8 +208,7 @@ struct LXSourceTestPanel: View {
                 "hash": song.hash ?? song.sourceID
             ]
             let url = try await host.resolve(source: testPlatform, musicInfo: info, quality: "320k", timeout: 20)
-            previewPlayer?.pause()
-            previewPlayer = nil
+            stopPreview()
             previewURL = url
             message = "解析成功，已取得 URL。点击试听验证播放：\(url.absoluteString)"
         } catch {
@@ -218,18 +217,50 @@ struct LXSourceTestPanel: View {
     }
 
     @MainActor
+    private func stopPreview() {
+        previewDiagnosticTask?.cancel()
+        previewDiagnosticTask = nil
+        previewPlayer?.pause()
+        previewPlayer = nil
+    }
+
+    @MainActor
     private func togglePreview() {
-        if let previewPlayer {
-            previewPlayer.pause()
-            self.previewPlayer = nil
+        if previewPlayer != nil {
+            stopPreview()
             message = "已停止试听。"
             return
         }
         guard let previewURL else { return }
-        let player = AVPlayer(url: previewURL)
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            message = "音频会话初始化失败：\(error.localizedDescription)"
+            return
+        }
+        let item = AVPlayerItem(url: previewURL)
+        let player = AVPlayer(playerItem: item)
         previewPlayer = player
         player.play()
-        message = "已发起试听，请确认是否听到声音。无声音不能视为验证通过。"
+        message = "已请求播放，正在检测音频加载状态…"
+        previewDiagnosticTask = Task { @MainActor in
+            for _ in 0..<12 {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled, previewPlayer === player else { return }
+                if item.status == .failed {
+                    message = "试听失败：\(item.error?.localizedDescription ?? "未知播放器错误")"
+                    return
+                }
+                if player.timeControlStatus == .playing {
+                    message = "播放器报告正在播放；请确认是否听到声音。"
+                    return
+                }
+            }
+            guard !Task.isCancelled else { return }
+            let itemError = item.error?.localizedDescription ?? "无明确错误"
+            message = "12 秒内未开始播放；itemStatus=\(item.status.rawValue)，timeControlStatus=\(player.timeControlStatus.rawValue)，reason=\(player.reasonForWaitingToPlay?.rawValue ?? "无")，error=\(itemError)"
+        }
     }
 
     private func delete(at offsets: IndexSet) {
