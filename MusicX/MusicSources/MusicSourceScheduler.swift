@@ -199,6 +199,7 @@ struct MusicSourceScheduler: MusicURLResolving {
         let key = Data("e82ckenh8dichen8".utf8)
         var encrypted = Data(count: plain.count + kCCBlockSizeAES128)
         var moved = 0
+        let encryptedCapacity = encrypted.count
 
         let status: CCCryptorStatus = key.withUnsafeBytes { keyBytes in
             plain.withUnsafeBytes { inputBytes in
@@ -208,7 +209,7 @@ struct MusicSourceScheduler: MusicURLResolving {
                         CCOptions(kCCOptionPKCS7Padding | kCCOptionECBMode),
                         keyBytes.baseAddress, key.count, nil,
                         inputBytes.baseAddress, plain.count,
-                        outputBytes.baseAddress, encrypted.count, &moved
+                        outputBytes.baseAddress, encryptedCapacity, &moved
                     )
                 }
             }
