@@ -6,6 +6,9 @@ import UniformTypeIdentifiers
 struct LXSourceTestPanel: View {
     @Environment(\.dismiss) private var dismiss
     @State private var isImporterPresented = false
+    @State private var isURLImporterPresented = false
+    @State private var remoteScriptURL = ""
+    @State private var isImportingRemote = false
     @State private var importedIDs: [String] = []
     @State private var message: String?
     @State private var selectedID: String?
@@ -61,6 +64,7 @@ struct LXSourceTestPanel: View {
                     Text("可导入多个音源，点击左侧圆圈切换当前测试音源。")
                         .font(.caption).foregroundStyle(.secondary)
                     Button("从文件导入 .js 音源") { isImporterPresented = true }
+                    Button("从网址导入在线 JS 音源") { isURLImporterPresented = true }
                 }
                 Section("多平台歌曲搜索与试听") {
                     Picker("平台", selection: $testPlatform) {
@@ -124,6 +128,15 @@ struct LXSourceTestPanel: View {
                     message = "已导入 \(imported.count) 个音源。\(failed.isEmpty ? "" : "失败：\(failed.joined(separator: "；"))")"
                 } catch { message = "导入失败：\(error.localizedDescription)" }
             }
+            .alert("在线音源导入", isPresented: $isURLImporterPresented) {
+                TextField("https://…/source.js", text: $remoteScriptURL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("取消", role: .cancel) {}
+                Button("导入") { Task { await importRemoteScript() } }
+            } message: {
+                Text("输入 HTTPS 的 JS 文件直链。导入后保存到本地，后续仍需手动选择和测试。")
+            }
             .onAppear { reload() }
             .onDisappear { stopPreview() }
         }
@@ -144,6 +157,45 @@ struct LXSourceTestPanel: View {
             selectedID = store.selectedID
         }
         catch { message = "读取失败：\(error.localizedDescription)" }
+    }
+
+    @MainActor
+    private func importRemoteScript() async {
+        guard !isImportingRemote else { return }
+        isImportingRemote = true
+        defer { isImportingRemote = false }
+        let input = remoteScriptURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: input), url.scheme?.lowercased() == "https",
+              url.host != nil, url.user == nil, url.password == nil else {
+            message = "导入失败：请输入有效的 HTTPS JS 直链"
+            return
+        }
+        message = "正在获取在线音源…"
+        do {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 15
+            request.setValue("application/javascript, text/javascript, text/plain", forHTTPHeaderField: "Accept")
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                message = "在线音源下载失败：HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)"
+                return
+            }
+            guard data.count <= 2 * 1024 * 1024 else {
+                message = "导入失败：JS 文件超过 2 MB"
+                return
+            }
+            // Some online sources use a versioned or extensionless download URL.
+            // Store them as .js while keeping the source's original filename where possible.
+            let rawName = http.url?.lastPathComponent ?? url.lastPathComponent
+            let filename = rawName.lowercased().hasSuffix(".js") ? rawName : "online-source.js"
+            let imported = try getLibrary().importScript(data: data, filename: filename)
+            reload()
+            try getLibrary().select(id: imported.id)
+            selectedID = imported.id
+            message = "在线音源已导入：\(imported.filename)。请点击「检查」确认注册，再测试取链。"
+        } catch {
+            message = "在线音源导入失败：\(error.localizedDescription)"
+        }
     }
 
     private func inspect(id: String) {
