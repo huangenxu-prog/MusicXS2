@@ -33,6 +33,7 @@ struct MusicDiscoveryPage: View {
     let onSelectChart: (String) -> Void
 
     @State private var songs: [MusicSong] = []
+    @State private var platformCollections: [PlatformCollection] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
     private var selectedChart: String {
@@ -112,6 +113,11 @@ struct MusicDiscoveryPage: View {
             miniPlayerBar(song: currentSong)
         }
         .task(id: route.id) { await loadSongs() }
+        .task(id: route.id) {
+            if case .playlists = route {
+                platformCollections = (try? await PlatformCollectionCatalog().remainingRecommendedCollections()) ?? []
+            }
+        }
     }
 
     private var topBar: some View {
@@ -358,8 +364,12 @@ struct MusicDiscoveryPage: View {
             ("影视原声精选", "问心系列 · 影视原声带", "category_light"),
             ("通勤驾驶精选", "通勤路上 · 有前行感的节奏", "category_rock")
         ]
+        let liveItems: [(String, String, String)] = platformCollections.map { collection in
+            (collection.name, collection.provider == .qq ? "QQ 音乐推荐" : "网易云音乐推荐", "category_singers")
+        }
+        let displayItems = liveItems.isEmpty ? items : liveItems
         return LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 18) {
-            ForEach(items, id: \.0) { item in
+            ForEach(displayItems, id: \.0) { item in
                 Button { onOpenPlaylist(item.0) } label: {
                     VStack(alignment: .leading, spacing: 7) {
                         ZStack(alignment: .bottomTrailing) {
@@ -499,7 +509,13 @@ struct MusicDiscoveryPage: View {
             case .album:
                 result = try await service.search(keyword: query, source: .netease, count: 50, albumOnly: true)
             case .playlist:
-                result = try await service.playlistTracks(keyword: query, count: 50)
+                let catalog = PlatformCollectionCatalog()
+                let collections = try? await catalog.remainingRecommendedCollections()
+                if let selected = collections?.first(where: { $0.name == query }) {
+                    result = try await catalog.tracks(for: selected, count: 50)
+                } else {
+                    result = try await service.playlistTracks(keyword: query, count: 50)
+                }
             default:
                 result = try await service.search(keyword: query, source: .netease, count: 30)
             }
