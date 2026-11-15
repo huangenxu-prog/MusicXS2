@@ -47,7 +47,7 @@ final class LXSourceLibrary {
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw LibraryError.emptyScript
         }
-        return try importScript(data: data, filename: filename)
+        return try importScript(data: data, filename: file.lastPathComponent)
     }
 
     @discardableResult
