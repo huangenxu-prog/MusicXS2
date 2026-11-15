@@ -292,7 +292,15 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: .musicXPlaybackFailed)) { notification in
                 guard let failedItem = notification.object as? AVPlayerItem,
                       playerStore.isCurrentItem(failedItem) else { return }
-                retryCurrentSongWithFreshURL()
+                if currentSong?.onlineSong?.source == .qq {
+                    playbackTask?.cancel()
+                    playbackRequestID = UUID()
+                    isResolvingSong = false
+                    playerStore.stop()
+                    searchError = "QQ 歌曲暂不可播放，请手动选择其他歌曲"
+                } else {
+                    retryCurrentSongWithFreshURL()
+                }
             }
     }
 
@@ -1731,14 +1739,16 @@ struct ContentView: View {
     /// providers not yet tried for this track before advancing the queue.
     private func retryCurrentSongWithFreshURL() {
         guard let song = currentSong, let onlineSong = song.onlineSong else {
-            advanceAfterPlaybackFailure()
+            playerStore.stop()
+            searchError = "当前歌曲暂不可播放"
             return
         }
         let retryCount = playbackRetryCounts[song.id, default: 0]
         // Four providers are registered in the resource engine, so allow up to
         // three same-track retries after the initial provider has failed.
         guard retryCount < 3 else {
-            advanceAfterPlaybackFailure()
+            playerStore.stop()
+            searchError = "当前歌曲暂不可播放，请手动选择其他歌曲"
             return
         }
         playbackRetryCounts[song.id] = retryCount + 1
@@ -1803,7 +1813,7 @@ struct ContentView: View {
                     detail: "playback_id=\(retryDiagnosticID); error=\(error.localizedDescription)"
                 )
                 searchError = "重新获取播放地址失败：\(error.localizedDescription)"
-                advanceAfterPlaybackFailure()
+                playerStore.stop()
             }
         }
     }
@@ -1998,7 +2008,7 @@ struct ContentView: View {
                     } catch {
                         try Task.checkCancellation()
                         let api = MusicXPlaybackAPI()
-                        guard api.isConfigured else { throw error }
+                        guard onlineSong.source != .qq, api.isConfigured else { throw error }
                         let resolution = try await api.resolve(song: onlineSong)
                         guard let vpsURL = resolution.url else { throw MusicXPlaybackAPI.APIError.noPlayableURL }
                         vpsResolvedSongID = song.id
@@ -2034,7 +2044,7 @@ struct ContentView: View {
                     )
                     isResolvingSong = false
                     searchError = error.localizedDescription
-                    advanceAfterPlaybackFailure()
+                    playerStore.stop()
                 }
             }
         } else {
