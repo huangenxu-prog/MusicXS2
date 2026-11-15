@@ -9,6 +9,11 @@ struct LXSourceTestPanel: View {
     @State private var message: String?
     @State private var selectedID: String?
     @State private var library: LXSourceLibrary?
+    @State private var testSongMID = ""
+    @State private var testSongName = ""
+    @State private var testArtist = ""
+    @State private var isResolving = false
+    @State private var activeHost: LXSourceScriptHost?
 
     var body: some View {
         NavigationStack {
@@ -48,6 +53,19 @@ struct LXSourceTestPanel: View {
                     Text("可导入多个音源，点击左侧圆圈切换当前测试音源。")
                         .font(.caption).foregroundStyle(.secondary)
                     Button("从文件导入 .js 音源") { isImporterPresented = true }
+                }
+                Section("QQ 真实取链测试") {
+                    TextField("QQ songmid（必填）", text: $testSongMID)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("歌曲名称（可选）", text: $testSongName)
+                    TextField("歌手名称（可选）", text: $testArtist)
+                    Button(isResolving ? "正在解析…" : "用当前音源测试 QQ 取链") {
+                        Task { await resolveSelectedQQ() }
+                    }
+                    .disabled(isResolving || selectedID == nil || testSongMID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Text("只请求播放地址，不启动播放。部分音源可能要求授权或返回地区限制。")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 if let message {
                     Section("测试结果") { Text(message).font(.footnote).textSelection(.enabled) }
@@ -97,6 +115,27 @@ struct LXSourceTestPanel: View {
             let platforms = host.registeredSources.keys.sorted()
             message = platforms.isEmpty ? "脚本已加载，但未注册音源。" : "初始化完成，已注册：\(platforms.joined(separator: ", "))。未进行真实取链测试。"
         } catch { message = "脚本检查失败：\(error.localizedDescription)" }
+    }
+
+    @MainActor
+    private func resolveSelectedQQ() async {
+        guard let id = selectedID else { return }
+        isResolving = true
+        defer { isResolving = false; activeHost = nil }
+        do {
+            let script = try getLibrary().load(id: id)
+            let host = try LXSourceScriptHost(script: script)
+            activeHost = host
+            let info: [String: Any] = [
+                "songmid": testSongMID.trimmingCharacters(in: .whitespacesAndNewlines),
+                "name": testSongName,
+                "singer": testArtist
+            ]
+            let url = try await host.resolve(source: "tx", musicInfo: info, quality: "320k", timeout: 20)
+            message = "解析成功（仅获得 URL，未验证音频可播放）：\(url.absoluteString)"
+        } catch {
+            message = "真实取链失败：\(error.localizedDescription)"
+        }
     }
 
     private func delete(at offsets: IndexSet) {
