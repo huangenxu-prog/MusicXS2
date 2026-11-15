@@ -1371,7 +1371,17 @@ struct MusicDiscoveryPage: View {
             case .album(let albumTitle, let albumArtist):
                 result = await searchAlbumTracks(title: albumTitle, artist: albumArtist)
             case .musicCategory(_, _, _, let keyword):
-                result = try await catalog.search(keyword: keyword, source: .netease, count: 30)
+                async let qqSongs = catalog.search(keyword: keyword, source: .qq, count: 50)
+                async let neteaseSongs = catalog.search(keyword: keyword, source: .netease, count: 50)
+                let qqRows = (try? await qqSongs) ?? []
+                let neteaseRows = (try? await neteaseSongs) ?? []
+                var categorySeen = Set<String>()
+                result = (qqRows + neteaseRows).filter { item in
+                    let key = (item.title + "|" + item.artist)
+                        .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+                        .filter { $0.isLetter || $0.isNumber || $0 == "|" }
+                    return categorySeen.insert(key).inserted
+                }
             case .featuredPick:
                 result = []
             case .playlist(let name):
