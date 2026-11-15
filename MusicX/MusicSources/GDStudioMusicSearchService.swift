@@ -354,7 +354,7 @@ struct GDStudioMusicSearchService {
         request.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw MusicSourceError.invalidResponse("酷狗原生搜索 HTTP \\((response as? HTTPURLResponse)?.statusCode ?? -1)")
+            throw MusicSourceError.invalidResponse("酷狗原生搜索 HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1)")
         }
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               (root["error_code"] as? Int) == 0,
@@ -408,7 +408,7 @@ struct GDStudioMusicSearchService {
         request.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw MusicSourceError.invalidResponse("酷我原生搜索 HTTP \\((response as? HTTPURLResponse)?.statusCode ?? -1)")
+            throw MusicSourceError.invalidResponse("酷我原生搜索 HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1)")
         }
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let rows = root["abslist"] as? [[String: Any]] else {
