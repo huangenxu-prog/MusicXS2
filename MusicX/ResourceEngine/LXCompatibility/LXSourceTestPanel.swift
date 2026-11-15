@@ -147,7 +147,7 @@ struct LXSourceTestPanel: View {
         previewURL = nil
         do {
             let query = [testSongName, testArtist].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: " ")
-            let songs = try await GDStudioMusicSearchService().search(keyword: query, source: .qq, count: 20)
+            let songs = try await GDStudioMusicSearchService().searchQQSongsNative(keyword: query, count: 20)
             searchResults = songs
             message = songs.isEmpty ? "QQ 搜索未找到歌曲，请尝试只输入歌名。" : "找到 \(songs.count) 首歌曲，点击对应歌曲开始解析。"
         } catch {
