@@ -27,6 +27,7 @@ final class LXSourceScriptHost {
     private(set) var lastError: String?
     private var nextRequestID = 0
     private var completions: [Int: (Result<String, Error>) -> Void] = [:]
+    private var timeoutTasks: [Int: Task<Void, Never>] = [:]
 
     init(script: String, session: URLSession = .shared) throws {
         guard let context = JSContext() else {
@@ -73,8 +74,9 @@ final class LXSourceScriptHost {
             ]
             let json = Self.jsonString(payload)
             context.evaluateScript("__lxResolve(\(id), \(json))")
-            Task { @MainActor [weak self] in
-                try? await Task.sleep(nanoseconds: UInt64(max(timeout, 1) * 1_000_000_000))
+            timeoutTasks[id] = Task { @MainActor [weak self] in
+                do { try await Task.sleep(nanoseconds: UInt64(max(timeout, 1) * 1_000_000_000)) }
+                catch { return }
                 self?.finish(id: id, result: .failure(HostError.timedOut))
             }
         }
@@ -85,6 +87,7 @@ final class LXSourceScriptHost {
 
     private func finish(id: Int, result: Result<String, Error>) {
         guard let completion = completions.removeValue(forKey: id) else { return }
+        timeoutTasks.removeValue(forKey: id)?.cancel()
         completion(result)
     }
 
@@ -97,12 +100,12 @@ final class LXSourceScriptHost {
         let opts = options.toDictionary() ?? [:]
         var request = URLRequest(url: target)
         request.httpMethod = opts["method"] as? String ?? "GET"
-        if let headers = opts["headers"] as? [String: String] {
-            for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
+        if let headers = opts["headers"] as? [String: Any] {
+            for (key, value) in headers { request.setValue(String(describing: value), forHTTPHeaderField: key) }
         }
         if let body = opts["body"] as? String { request.httpBody = Data(body.utf8) }
-        if let timeout = opts["timeout"] as? Double {
-            request.timeoutInterval = max(1, timeout / 1000)
+        if let timeout = opts["timeout"] as? NSNumber {
+            request.timeoutInterval = max(1, timeout.doubleValue / 1000)
         }
         session.dataTask(with: request) { data, response, error in
             DispatchQueue.main.async {
@@ -130,7 +133,6 @@ final class LXSourceScriptHost {
     private static let bootstrap = #"""
     (function () {
       const handlers = {};
-      const pending = {};
       const EVENTS = { request: 'request', inited: 'inited',
                        updateAlert: 'updateAlert' };
       globalThis.lx = {
@@ -140,6 +142,7 @@ final class LXSourceScriptHost {
         send: function (event, payload) { __lxSend(event, payload); },
         request: function (url, options, callback) {
           if (typeof options === 'function') { callback = options; options = {}; }
+          if (typeof callback !== "function") throw new Error("lx.request requires callback");
           __lxHTTP(url, options || {}, callback);
         },
         utils: {
