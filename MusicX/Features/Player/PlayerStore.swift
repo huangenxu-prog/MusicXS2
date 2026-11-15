@@ -374,6 +374,11 @@ final class PlayerStore: ObservableObject {
         player.pause()
         isPlaying = false
         isBuffering = false
+        // The selected track has changed, but its new AVPlayerItem is not ready.
+        // Do not expose the previous item's elapsed time or duration meanwhile.
+        currentTime = 0
+        duration = 0
+        hasPublishedDuration = false
         updateNowPlayingInfo()
     }
 
