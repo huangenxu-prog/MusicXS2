@@ -26,6 +26,7 @@ final class LXSourceLibrary {
         }
     }
 
+    private let selectedKey = "musicx.lx.selected-source.v1"
     private let directory: URL
     private let maximumSize = 2 * 1024 * 1024
 
@@ -49,6 +50,8 @@ final class LXSourceLibrary {
         let id = UUID().uuidString.lowercased()
         let target = directory.appendingPathComponent(id).appendingPathExtension("js")
         try data.write(to: target, options: .atomic)
+        try Data(file.lastPathComponent.utf8).write(to: directory.appendingPathComponent(id).appendingPathExtension("name"), options: .atomic)
+        if selectedID == nil { selectedID = id }
         return Script(id: id, filename: file.lastPathComponent, contents: text)
     }
 
@@ -59,6 +62,23 @@ final class LXSourceLibrary {
             .sorted()
     }
 
+    var selectedID: String? {
+        get { UserDefaults.standard.string(forKey: selectedKey) }
+        set { UserDefaults.standard.set(newValue, forKey: selectedKey) }
+    }
+
+    func select(id: String) throws {
+        let url = try scriptURL(for: id)
+        guard FileManager.default.fileExists(atPath: url.path) else { throw LibraryError.invalidIdentifier }
+        selectedID = id.lowercased()
+    }
+
+    func filename(id: String) throws -> String {
+        _ = try scriptURL(for: id)
+        let url = directory.appendingPathComponent(id.lowercased()).appendingPathExtension("name")
+        return (try? String(contentsOf: url, encoding: .utf8)) ?? id
+    }
+
     func load(id: String) throws -> String {
         let url = try scriptURL(for: id)
         return try String(contentsOf: url, encoding: .utf8)
@@ -66,6 +86,9 @@ final class LXSourceLibrary {
 
     func remove(id: String) throws {
         try FileManager.default.removeItem(at: scriptURL(for: id))
+        let nameURL = directory.appendingPathComponent(id.lowercased()).appendingPathExtension("name")
+        try? FileManager.default.removeItem(at: nameURL)
+        if selectedID == id.lowercased() { selectedID = try listIdentifiers().first }
     }
 
     private func scriptURL(for id: String) throws -> URL {
