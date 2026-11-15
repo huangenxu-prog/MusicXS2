@@ -25,6 +25,8 @@ final class LXSourceScriptHost {
     private let session: URLSession
     private(set) var registeredSources: [String: Any] = [:]
     private(set) var lastError: String?
+    private(set) var initializationEvents: [String] = []
+    private(set) var didReceiveInitialization = false
     private var nextRequestID = 0
     private var completions: [Int: (Result<String, Error>) -> Void] = [:]
     private var timeoutTasks: [Int: Task<Void, Never>] = [:]
@@ -37,13 +39,16 @@ final class LXSourceScriptHost {
         self.session = session
         context.exceptionHandler = { [weak self] _, exception in
             self?.lastError = exception?.toString()
+            self?.initializationEvents.append("JS exception: \(exception?.toString() ?? "unknown")")
         }
 
         let network: @convention(block) (String, JSValue, JSValue) -> Void = { [weak self] url, options, callback in
             self?.performHTTP(url: url, options: options, callback: callback)
         }
         let registration: @convention(block) (String, JSValue) -> Void = { [weak self] event, payload in
+            self?.initializationEvents.append("event: \(event)")
             guard event == "inited" else { return }
+            self?.didReceiveInitialization = true
             self?.registeredSources = payload.toDictionary()?["sources"] as? [String: Any] ?? [:]
         }
         let complete: @convention(block) (Int, String, String) -> Void = { [weak self] id, value, error in
@@ -58,6 +63,16 @@ final class LXSourceScriptHost {
         if let error = lastError {
             throw HostError.initialization(error)
         }
+    }
+
+    /// Wait for scripts that register after asynchronous setup or HTTP callbacks.
+    func awaitRegistration(timeout: TimeInterval = 8) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !didReceiveInitialization && Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(200))
+            if Task.isCancelled { break }
+        }
+        return !registeredSources.isEmpty
     }
 
     /// Requests a URL through the LX musicUrl event. The JS promise is resolved in its own context.
