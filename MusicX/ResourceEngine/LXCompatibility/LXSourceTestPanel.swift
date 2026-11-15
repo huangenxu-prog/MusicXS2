@@ -147,7 +147,19 @@ struct LXSourceTestPanel: View {
         previewURL = nil
         do {
             let query = [testSongName, testArtist].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: " ")
-            let songs = try await GDStudioMusicSearchService().searchQQSongsNative(keyword: query, count: 20)
+            let service = GDStudioMusicSearchService()
+            let songs: [MusicSong]
+            do {
+                songs = try await service.searchQQSongsNative(keyword: query, count: 20)
+            } catch {
+                let nativeError = error.localizedDescription
+                do {
+                    songs = try await service.search(keyword: query, source: .qq, count: 20)
+                } catch {
+                    message = "QQ 原生搜索失败：\(nativeError)；备用搜索失败：\(error.localizedDescription)"
+                    return
+                }
+            }
             searchResults = songs
             message = songs.isEmpty ? "QQ 搜索未找到歌曲，请尝试只输入歌名。" : "找到 \(songs.count) 首歌曲，点击对应歌曲开始解析。"
         } catch {
