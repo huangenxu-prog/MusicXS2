@@ -27,6 +27,48 @@ struct PlatformCollectionCatalog {
         return (results.0 + results.1).filter { seen.insert($0.id).inserted }
     }
 
+    /// Both source feeds keep their own ordering; first item is reserved for
+    /// the corresponding featured-song entry and never enters the remainder.
+    func remainingRecommendedCollections() async throws -> [PlatformCollection] {
+        async let qq = qqRecommendations()
+        async let netease = neteaseRecommendations()
+        let (qqRows, neteaseRows) = try await (qq, netease)
+        let qqRemaining = Array(qqRows.dropFirst())
+        let neteaseRemaining = Array(neteaseRows.dropFirst())
+        var merged: [PlatformCollection] = []
+        var seenIDs = Set<String>()
+        var seenTitles = Set<String>()
+        for index in 0..<max(qqRemaining.count, neteaseRemaining.count) {
+            for group in [qqRemaining, neteaseRemaining] where group.indices.contains(index) {
+                let item = group[index]
+                let normalized = item.name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+                    .filter { $0.isLetter || $0.isNumber }
+                guard seenIDs.insert(item.id).inserted else { continue }
+                if !normalized.isEmpty && !seenTitles.insert(normalized).inserted { continue }
+                merged.append(item)
+            }
+        }
+        return merged
+    }
+
+    /// A catalog request is not equivalent to loading every track. Load tracks
+    /// on demand and deduplicate equivalent recordings by title and artist.
+    func mergedTracks(for collections: [PlatformCollection], countPerCollection: Int = 50) async throws -> [MusicSong] {
+        var merged: [MusicSong] = []
+        var seen = Set<String>()
+        for collection in collections {
+            try Task.checkCancellation()
+            let tracks = try await tracks(for: collection, count: countPerCollection)
+            for song in tracks {
+                let key = (song.title + "|" + song.artist)
+                    .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+                    .filter { $0.isLetter || $0.isNumber || $0 == "|" }
+                if seen.insert(key).inserted { merged.append(song) }
+            }
+        }
+        return merged
+    }
+
     func qqRecommendations() async throws -> [PlatformCollection] {
         let url = URL(string: "https://u.y.qq.com/cgi-bin/musicu.fcg")!
         let body: [String: Any] = [
