@@ -400,7 +400,7 @@ enum MusicSongMatcher {
         } else {
             durationScore = 5
         }
-        let albumScore = normalized(source.album ?? "") == normalized(candidate.album ?? "") ? 0 : 1
+        let albumScore: Double = normalized(source.album ?? "") == normalized(candidate.album ?? "") ? 0 : 1
         return durationScore + albumScore
     }
 
