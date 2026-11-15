@@ -50,6 +50,19 @@ struct LXBridgeSmokeTest {
             guard message.contains("expected failure") else { throw NSError(domain: "LXSmoke", code: 4) }
         }
 
+        // Verify common LX crypto and binary helpers required by Flower/Grass.
+        let helpers = try LXSourceScriptHost(script: """
+        const lx = globalThis.lx;
+        if (lx.utils.crypto.md5('abc') !== '900150983cd24fb0d6963f7d28e17f72') throw new Error('MD5 mismatch');
+        if (lx.utils.buffer.bufToString(lx.utils.buffer.from('6869', 'hex')) !== 'hi') throw new Error('hex buffer mismatch');
+        if (!lx.currentScriptInfo.version || !lx.version) throw new Error('script metadata missing');
+        lx.on(lx.EVENT_NAMES.request, () => 'https://example.com/helper-test.mp3');
+        lx.send(lx.EVENT_NAMES.inited, { sources: { tx: {} } });
+        """)
+        guard helpers.registeredSources["tx"] != nil else {
+            throw NSError(domain: "LXSmoke", code: 8, userInfo: [NSLocalizedDescriptionKey: "helper script failed to register"])
+        }
+
         // Exercise the exact user-supplied Xinghai script with deterministic mocked HTTP.
         let fixtureURL = URL(fileURLWithPath: "scripts/fixtures/xinghai-v3.2.19.js")
         let fixture = try String(contentsOf: fixtureURL, encoding: .utf8)
