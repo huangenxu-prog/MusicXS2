@@ -210,6 +210,16 @@ struct LXSourceTestPanel: View {
             let script = try getLibrary().load(id: id)
             let host = try LXSourceScriptHost(script: script)
             activeHost = host
+            // Some community sources register only after an asynchronous update
+            // check. Never resolve until the source has announced "inited".
+            let registered = await host.awaitRegistration(timeout: 8)
+            guard registered, host.registeredSources[testPlatform] != nil else {
+                let events = host.initializationEvents.suffix(8).joined(separator: "；")
+                let platforms = host.registeredSources.keys.sorted().joined(separator: ", ")
+                throw LXSourceScriptHost.HostError.initialization(
+                    "音源未注册当前平台 \(testPlatform)；已注册：\(platforms.isEmpty ? "无" : platforms)；JS 错误：\(host.lastError ?? "无")；事件：\(events.isEmpty ? "无" : events)"
+                )
+            }
             let info: [String: Any] = [
                 "songmid": song.sourceID,
                 "id": song.sourceID,
