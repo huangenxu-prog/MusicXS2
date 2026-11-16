@@ -32,6 +32,7 @@ final class LXSourceScriptHost {
     // JSValue callbacks must remain strongly rooted until URLSession completes.
     private var nextHTTPID = 0
     private var pendingHTTPCallbacks: [Int: JSValue] = [:]
+    private var pendingHTTPTasks: [Int: URLSessionDataTask] = [:]
     private var nextTimerID = 0
     private var pendingTimers: [Int: (callback: JSValue, task: Task<Void, Never>)] = [:]
     private var completions: [Int: (Result<String, Error>) -> Void] = [:]
@@ -48,8 +49,11 @@ final class LXSourceScriptHost {
             self?.initializationEvents.append("JS exception: \(exception?.toString() ?? "unknown")")
         }
 
-        let network: @convention(block) (String, JSValue, JSValue) -> Void = { [weak self] url, options, callback in
-            self?.performHTTP(url: url, options: options, callback: callback)
+        let network: @convention(block) (String, JSValue, JSValue) -> Int = { [weak self] url, options, callback in
+            self?.performHTTP(url: url, options: options, callback: callback) ?? -1
+        }
+        let cancelHTTP: @convention(block) (Int) -> Void = { [weak self] id in
+            self?.cancelHTTP(id: id)
         }
         let registration: @convention(block) (String, JSValue) -> Void = { [weak self] event, payload in
             self?.initializationEvents.append("event: \(event)")
@@ -99,6 +103,7 @@ final class LXSourceScriptHost {
         context.setObject(scheduleTimer, forKeyedSubscript: "__lxSetTimeout" as NSString)
         context.setObject(cancelTimer, forKeyedSubscript: "__lxClearTimeout" as NSString)
         context.setObject(network, forKeyedSubscript: "__lxHTTP" as NSString)
+        context.setObject(cancelHTTP, forKeyedSubscript: "__lxCancelHTTP" as NSString)
         context.setObject(complete, forKeyedSubscript: "__lxComplete" as NSString)
         context.setObject(registration, forKeyedSubscript: "__lxSend" as NSString)
         let log: @convention(block) (String, String) -> Void = { [weak self] level, message in
@@ -180,7 +185,8 @@ final class LXSourceScriptHost {
         completion(result)
     }
 
-    private func performHTTP(url: String, options: JSValue, callback: JSValue) {
+    @discardableResult
+    private func performHTTP(url: String, options: JSValue, callback: JSValue) -> Int {
         nextHTTPID += 1
         let requestID = nextHTTPID
         // JSCore may collect an asynchronously captured JS function unless
@@ -190,7 +196,7 @@ final class LXSourceScriptHost {
               ["https", "http"].contains(target.scheme?.lowercased() ?? ""),
               target.host != nil else {
             finishHTTP(id: requestID, error: "Invalid HTTP URL", response: nil)
-            return
+            return requestID
         }
         let opts = options.toDictionary() ?? [:]
         var request = URLRequest(url: target)
@@ -205,7 +211,7 @@ final class LXSourceScriptHost {
             request.timeoutInterval = max(1, timeout.doubleValue / 1000)
         }
         initializationEvents.append("HTTP start #\(requestID) \(target.host ?? "unknown")")
-        session.dataTask(with: request) { [weak self] data, response, error in
+        let task = session.dataTask(with: request) { [weak self] data, response, error in
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 if let error {
@@ -241,10 +247,21 @@ final class LXSourceScriptHost {
                     "headers": http?.allHeaderFields ?? [:]
                 ])
             }
-        }.resume()
+        }
+        pendingHTTPTasks[requestID] = task
+        task.resume()
+        return requestID
+    }
+
+    private func cancelHTTP(id: Int) {
+        // Cancellation is a normal outcome when a faster source wins. Do not
+        // invoke the JS callback after cancellation; the caller has settled.
+        pendingHTTPCallbacks.removeValue(forKey: id)
+        pendingHTTPTasks.removeValue(forKey: id)?.cancel()
     }
 
     private func finishHTTP(id: Int, error: String?, response: [String: Any]?) {
+        pendingHTTPTasks.removeValue(forKey: id)
         guard let callback = pendingHTTPCallbacks.removeValue(forKey: id) else { return }
         if let error {
             initializationEvents.append("HTTP error #\(id): \(error)")
@@ -290,7 +307,7 @@ final class LXSourceScriptHost {
         request: function (url, options, callback) {
           if (typeof options === 'function') { callback = options; options = {}; }
           if (typeof callback !== "function") throw new Error("lx.request requires callback");
-          return __lxHTTP(url, options || {}, function (err, response, body) {
+          const id = __lxHTTP(url, options || {}, function (err, response, body) {
             // The LX callback contract expects a JS Error, not a native string.
             // Preserve the original details for scripts reading error.message.
             if (err != null && err !== '') {
@@ -299,6 +316,7 @@ final class LXSourceScriptHost {
               callback(null, response, body);
             }
           });
+          return function () { __lxCancelHTTP(id); };
         },
         utils: {
           crypto: {
