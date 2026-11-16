@@ -62,6 +62,17 @@ final class LXSourceScriptHost {
         let md5: @convention(block) (String) -> String = { input in
             Insecure.MD5.hash(data: Data(input.utf8)).map { String(format: "%02x", $0) }.joined()
         }
+        // LX scripts may verify their own raw source against server-provided MD5.
+        // The metadata must describe the actual imported JS, not a placeholder.
+        let versionPattern = #"@version\\s+([^\\s*]+)"#
+        let scriptVersion: String
+        if let range = script.range(of: versionPattern, options: .regularExpression) {
+            scriptVersion = script[range].split(whereSeparator: { $0.isWhitespace }).last.map(String.init) ?? "1"
+        } else {
+            scriptVersion = "1"
+        }
+        context.setObject(script, forKeyedSubscript: "__lxRawScript" as NSString)
+        context.setObject(scriptVersion, forKeyedSubscript: "__lxScriptVersion" as NSString)
         context.setObject(md5, forKeyedSubscript: "__lxMD5" as NSString)
         context.setObject(network, forKeyedSubscript: "__lxHTTP" as NSString)
         context.setObject(complete, forKeyedSubscript: "__lxComplete" as NSString)
@@ -193,7 +204,7 @@ final class LXSourceScriptHost {
         EVENT_NAMES: EVENTS,
         env: 'ios',
         version: '2.0.0',
-        currentScriptInfo: { version: '1', name: 'LX custom source' },
+        currentScriptInfo: { version: __lxScriptVersion, name: 'LX custom source', rawScript: __lxRawScript },
         on: function (event, handler) { handlers[event] = handler; },
         send: function (event, payload) { __lxSend(event, payload); },
         request: function (url, options, callback) {
