@@ -328,7 +328,7 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
                                 if candidate.source == .netease {
                                     paths.addTask {
                                         guard let url = await MusicResourceEngine(session: session)
-                                            .resolveMatchedNetEase(song: candidate, quality: quality),
+                                            .resolveMatchedNetEase(song: candidate, quality: quality, excludedURLIDs: excludedURLIDs),
                                               !excludedURLIDs.contains(Self.fallbackURLID(url)) else {
                                             return nil
                                         }
