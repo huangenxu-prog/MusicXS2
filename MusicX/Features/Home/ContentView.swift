@@ -222,6 +222,7 @@ struct ContentView: View {
     @State private var isSourceAccessPromptPresented = false
     @State private var sourceAccessPhrase = ""
     @State private var isSourceAccessDeniedPresented = false
+    @State private var isSourceAccessGrantedPresented = false
 
     private var filteredSongs: [AppSong] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -933,24 +934,31 @@ struct ContentView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("音源测试")
-                    .alert("请输入口令", isPresented: $isSourceAccessPromptPresented) {
-                        SecureField("口令", text: $sourceAccessPhrase)
+                    .alert("嘘……这里是浅笑的秘密基地。", isPresented: $isSourceAccessPromptPresented) {
+                        SecureField("输入暗号", text: $sourceAccessPhrase)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                         Button("取消", role: .cancel) {
                             sourceAccessPhrase = ""
                         }
-                        Button("确定") {
+                        Button("验证暗号") {
                             if sourceAccessPhrase == "浅笑" {
-                                isLXSourceTestPresented = true
+                                isSourceAccessGrantedPresented = true
                             } else {
                                 isSourceAccessDeniedPresented = true
                             }
                             sourceAccessPhrase = ""
                         }
+                    } message: {
+                        Text("请对暗号，才能进入音源管理。")
                     }
-                    .alert("别闹🙄", isPresented: $isSourceAccessDeniedPresented) {
-                        Button("确定", role: .cancel) {}
+                    .alert("别闹🙄，你又不是浅笑。", isPresented: $isSourceAccessDeniedPresented) {
+                        Button("好吧", role: .cancel) {}
+                    }
+                    .alert("暗号对上了，自己人，请进。", isPresented: $isSourceAccessGrantedPresented) {
+                        Button("进去看看") {
+                            isLXSourceTestPresented = true
+                        }
                     }
                     .sheet(isPresented: $isLXSourceTestPresented) {
                         LXSourceTestPanel()
