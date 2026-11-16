@@ -203,6 +203,16 @@ final class LXSourceScriptHost {
                 } else {
                     body = raw
                 }
+                if let host = target.host, host == "registry.npmjs.org" || host == "registry.npmmirror.com" {
+                    if let dictionary = body as? [String: Any] {
+                        let keys = dictionary.keys.sorted().prefix(20).joined(separator: ",")
+                        let version = dictionary["version"] as? String ?? "unknown"
+                        let code = dictionary["code"].map { String(describing: $0) } ?? "none"
+                        self.initializationEvents.append("config #\(requestID): keys=[\(keys)], version=\(version), code=\(code)")
+                    } else {
+                        self.initializationEvents.append("config #\(requestID): non-object body, bytes=\(data?.count ?? 0)")
+                    }
+                }
                 self.finishHTTP(id: requestID, error: nil, response: [
                     "body": body,
                     "statusCode": http?.statusCode ?? 0,
