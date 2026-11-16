@@ -293,15 +293,10 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: .musicXPlaybackFailed)) { notification in
                 guard let failedItem = notification.object as? AVPlayerItem,
                       playerStore.isCurrentItem(failedItem) else { return }
-                if currentSong?.onlineSong?.source == .qq {
-                    playbackTask?.cancel()
-                    playbackRequestID = UUID()
-                    isResolvingSong = false
-                    playerStore.stop()
-                    searchError = "QQ 歌曲暂不可播放，请手动选择其他歌曲"
-                } else {
-                    retryCurrentSongWithFreshURL()
-                }
+                // QQ must follow the same per-provider retry path as other
+                // platforms. Imported LX scripts and cross-platform fallback
+                // would otherwise never run after AVPlayer rejects a QQ stream.
+                retryCurrentSongWithFreshURL()
             }
     }
 
@@ -1761,9 +1756,9 @@ struct ContentView: View {
             return
         }
         let retryCount = playbackRetryCounts[song.id, default: 0]
-        // Four providers are registered in the resource engine, so allow up to
-        // three same-track retries after the initial provider has failed.
-        guard retryCount < 3 else {
+        // Imported LX scripts are independent candidates in addition to the
+        // built-in providers. Permit bounded retries across distinct scripts.
+        guard retryCount < 8 else {
             playerStore.stop()
             searchError = "当前歌曲暂不可播放，请手动选择其他歌曲"
             return
