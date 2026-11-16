@@ -299,9 +299,26 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
                 for (candidate, score) in representatives {
                     group.addTask {
                         do {
-                            guard let url = try await resolveNative(song: candidate, quality: quality) else {
-                                return (nil, nil)
+                            // Native URL suppliers and every imported LX script
+                            // for this matched platform race as independent paths.
+                            // The matched platform's ID is passed to its own JS.
+                            let url = await withTaskGroup(of: URL?.self) { paths in
+                                paths.addTask {
+                                    try? await resolveNative(song: candidate, quality: quality)
+                                }
+                                paths.addTask {
+                                    try? await MusicResourceEngine(session: session)
+                                        .resolveImportedLX(song: candidate, quality: quality)
+                                }
+                                while let result = await paths.next() {
+                                    if let result {
+                                        paths.cancelAll()
+                                        return result
+                                    }
+                                }
+                                return nil
                             }
+                            guard let url else { return (nil, nil) }
                             MusicSourceDiagnostics.shared.record(
                                 event: "resolve-fallback", source: song.source.rawValue,
                                 provider: candidate.source.rawValue, duration: 0,
