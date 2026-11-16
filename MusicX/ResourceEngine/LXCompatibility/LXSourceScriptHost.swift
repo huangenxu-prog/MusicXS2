@@ -99,7 +99,12 @@ final class LXSourceScriptHost {
         context.setObject(complete, forKeyedSubscript: "__lxComplete" as NSString)
         context.setObject(registration, forKeyedSubscript: "__lxSend" as NSString)
         context.evaluateScript(Self.bootstrap)
+        guard context.evaluateScript("typeof setTimeout === 'function' && typeof clearTimeout === 'function'")?.toBool() == true else {
+            throw HostError.initialization("LX timer preflight failed: \(lastError ?? "no JS exception")")
+        }
+        initializationEvents.append("timer preflight OK")
         context.evaluateScript(script)
+        initializationEvents.append("timer postload: \(context.evaluateScript("typeof setTimeout + '/' + typeof clearTimeout")?.toString() ?? "unknown")")
         if let error = lastError {
             throw HostError.initialization(error)
         }
@@ -119,6 +124,11 @@ final class LXSourceScriptHost {
     func resolve(source: String, musicInfo: [String: Any], quality: String = "320k",
                  timeout: TimeInterval = 15) async throws -> URL {
         guard registeredSources[source] != nil else { throw HostError.notReady }
+        let timerStatus = context.evaluateScript("typeof setTimeout + '/' + typeof clearTimeout")?.toString() ?? "unknown"
+        initializationEvents.append("timer before resolve: \(timerStatus)")
+        guard timerStatus == "function/function" else {
+            throw HostError.initialization("JS timer unavailable before resolve: \(timerStatus)")
+        }
         nextRequestID += 1
         let id = nextRequestID
         let urlString: String = try await withCheckedThrowingContinuation { continuation in
@@ -219,11 +229,11 @@ final class LXSourceScriptHost {
     private static let bootstrap = #"""
     (function () {
       const handlers = {};
-      globalThis.setTimeout = function (callback, delay) {
+      var setTimeout = function (callback, delay) {
         if (typeof callback !== 'function') throw new TypeError('setTimeout callback must be a function');
         return __lxSetTimeout(callback, Number(delay) || 0);
       };
-      globalThis.clearTimeout = function (id) { __lxClearTimeout(Number(id) || 0); };
+      var clearTimeout = function (id) { __lxClearTimeout(Number(id) || 0); };
       const EVENTS = { request: 'request', inited: 'inited',
                        updateAlert: 'updateAlert' };
       globalThis.lx = {
