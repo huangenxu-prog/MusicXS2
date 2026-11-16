@@ -2523,7 +2523,7 @@ struct SongArtworkView: View {
                 resolvedURL = song.artworkURL
                 return
             }
-            if let metadataURL = try? await GDStudioMetadataService().artworkURL(for: song) {
+            if let metadataURL = try? await GDStudioMetadataService().artworkURL(for: song, size: size <= 72 ? 200 : 500) {
                 resolvedURL = metadataURL
             }
         }
