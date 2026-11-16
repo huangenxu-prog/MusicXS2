@@ -1,6 +1,7 @@
 import Foundation
 
-/// Kumone-inspired matching rules shared by independent supplier providers.
+/// Song identity is title + artist. Edition labels influence ranking rather
+/// than rejecting every alternative recording of the same work.
 enum AudioSourceTrackMatcher {
     static func matches(
         original: MusicSong,
@@ -10,21 +11,51 @@ enum AudioSourceTrackMatcher {
         candidateAlbum: String? = nil,
         requireDuration: Bool = false
     ) -> Bool {
-        // Cross-source identity is intentionally based only on normalized title
-        // and artist. Duration, album, and release/version metadata are not
-        // reliable across catalog providers and must not reject a valid match.
-        let expectedTitle = normalized(original.title)
-        let actualTitle = normalized(candidateTitle)
-        guard !expectedTitle.isEmpty, expectedTitle == actualTitle else { return false }
-        // Avoid cross-matching studio, live, remix, instrumental and other
-        // alternate editions that happen to share the same normalized title.
-        guard versionMarkers(in: original.title) == versionMarkers(in: candidateTitle) else {
-            return false
+        matchScore(original: original, candidateTitle: candidateTitle,
+                   candidateArtist: candidateArtist,
+                   candidateDuration: candidateDuration) > 0
+    }
+
+    /// 100 = same edition; 55 = acceptable alternate live/re-recorded edition;
+    /// 0 = different artist, remix, karaoke, instrumental, DJ, or cover.
+    static func matchScore(
+        original: MusicSong,
+        candidateTitle: String,
+        candidateArtist: String,
+        candidateDuration: TimeInterval? = nil
+    ) -> Int {
+        let originalEdition = edition(original.title)
+        let candidateEdition = edition(candidateTitle)
+        guard !originalEdition.title.isEmpty,
+              originalEdition.title == candidateEdition.title else { return 0 }
+
+        let expected = Set(artistParts(original.artist))
+        let actual = Set(artistParts(candidateArtist))
+        guard !expected.isEmpty, !actual.isEmpty,
+              !expected.isDisjoint(with: actual) else { return 0 }
+
+        // Never substitute remixes, backing tracks, covers or radically altered
+        // versions for the requested recording.
+        let excluded: Set<String> = ["remix", "instrumental", "cover", "dj",
+                                      "karaoke", "slowed", "spedup", "demo"]
+        if !originalEdition.markers.isDisjoint(with: excluded)
+            || !candidateEdition.markers.isDisjoint(with: excluded) {
+            return originalEdition.markers == candidateEdition.markers ? 100 : 0
         }
 
-        let expectedArtists = Set(artistParts(original.artist))
-        let actualArtists = Set(artistParts(candidateArtist))
-        return !expectedArtists.isDisjoint(with: actualArtists)
+        let versionKinds: Set<String> = ["live", "rerecorded", "acoustic"]
+        let originalKinds = originalEdition.markers.intersection(versionKinds)
+        let candidateKinds = candidateEdition.markers.intersection(versionKinds)
+        var score = originalKinds == candidateKinds ? 100 : 55
+
+        // Duration is a soft preference only; some catalogs report bad values.
+        if let first = original.duration, let second = candidateDuration,
+           first > 0, second > 0 {
+            let delta = abs(first - second)
+            if delta > 90 { score -= 15 }
+            else if delta > 30 { score -= 5 }
+        }
+        return max(1, score)
     }
 
     static func durationDifference(original: MusicSong, candidateDuration: TimeInterval?) -> TimeInterval {
@@ -37,8 +68,7 @@ enum AudioSourceTrackMatcher {
     private static func artistParts(_ value: String) -> [String] {
         let withoutFeaturedCredits = value.replacingOccurrences(
             of: #"(?i)\s+(?:feat\.?|ft\.?|featuring|with)\s+"#,
-            with: ";",
-            options: .regularExpression
+            with: ";", options: .regularExpression
         )
         return withoutFeaturedCredits
             .split(whereSeparator: { "/&＆、,，;；".contains($0) })
@@ -47,47 +77,44 @@ enum AudioSourceTrackMatcher {
     }
 
     private static func normalized(_ value: String) -> String {
-        value.folding(
-            options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive],
-            locale: Locale(identifier: "en_US_POSIX")
-        )
-        .unicodeScalars
-        .filter(CharacterSet.alphanumerics.contains)
-        .map(String.init)
-        .joined()
+        value.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive],
+                      locale: Locale(identifier: "en_US_POSIX"))
+            .unicodeScalars
+            .filter(CharacterSet.alphanumerics.contains)
+            .map(String.init).joined()
     }
 
-    private static func versionMarkers(in value: String) -> Set<String> {
-        let text = value.lowercased()
-            .folding(options: [.diacriticInsensitive, .widthInsensitive], locale: Locale(identifier: "en_US_POSIX"))
-
-        // English version labels must be complete tokens. Substring matching
-        // incorrectly classifies ordinary titles such as "Believe" as "Live"
-        // and "Discover" as "Cover".
-        let tokens = text.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
-        let tokenSet = Set(tokens)
+    private static func edition(_ value: String) -> (title: String, markers: Set<String>) {
+        let folded = value.folding(
+            options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive],
+            locale: Locale(identifier: "en_US_POSIX")
+        ).lowercased()
+        var text = folded
         var markers = Set<String>()
-
-        let englishMarkers = [
-            "live", "remix", "instrumental", "cover", "acoustic", "demo",
-            "remaster", "slowed", "dj", "karaoke"
+        let patterns: [(String, String)] = [
+            (#"(?i)\b(?:live|concert)\b|现场版?|演唱会版?"#, "live"),
+            (#"(?i)\b(?:remix|mix)\b|混音版?"#, "remix"),
+            (#"(?i)\b(?:instrumental|inst\.?|backing track)\b|伴奏版?|纯音乐"#, "instrumental"),
+            (#"(?i)\b(?:cover)\b|翻唱版?"#, "cover"),
+            (#"(?i)\bdj\b|dj版"#, "dj"),
+            (#"(?i)\bkaraoke\b|卡拉ok"#, "karaoke"),
+            (#"(?i)\b(?:slowed)\b|降速版?"#, "slowed"),
+            (#"(?i)\bsped[ -]?up\b|加速版?"#, "spedup"),
+            (#"(?i)\bdemo\b|小样版?"#, "demo"),
+            (#"(?i)\b(?:acoustic|unplugged)\b|不插电版?"#, "acoustic"),
+            (#"(?i)\b(?:re-recorded|rerecorded)\b|重新录制版?|重录版?|重制版?"#, "rerecorded")
         ]
-        markers.formUnion(englishMarkers.filter { tokenSet.contains($0) })
-
-        if tokens.count >= 2 {
-            for index in 0..<(tokens.count - 1) {
-                let phrase = tokens[index] + " " + tokens[index + 1]
-                if phrase == "sped up" { markers.insert("sped up") }
+        for (pattern, marker) in patterns {
+            if text.range(of: pattern, options: .regularExpression) != nil {
+                markers.insert(marker)
+                text = text.replacingOccurrences(of: pattern, with: " ",
+                                                  options: .regularExpression)
             }
         }
-
-        // Chinese labels do not have whitespace-delimited word boundaries,
-        // so retain substring matching for these explicit version terms.
-        let chineseMarkers = [
-            "伴奏", "纯音乐", "现场", "演唱会", "翻唱", "不插电",
-            "示范", "合唱", "重制", "加速", "降速"
-        ]
-        markers.formUnion(chineseMarkers.filter { text.contains($0) })
-        return markers
+        // Metadata/quality labels are not recording identities.
+        let metadata = #"(?:\b(?:lossless|flac|hires|hi-res|320k|128k|official|original|remastered|remaster)\b|无损(?:音质|版)?|高音质|官方版?|原版|标准版|母带版?)"#
+        text = text.replacingOccurrences(of: metadata, with: " ",
+                                          options: .regularExpression)
+        return (normalized(text), markers)
     }
 }
