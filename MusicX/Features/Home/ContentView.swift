@@ -391,6 +391,7 @@ struct ContentView: View {
                     withAnimation(.easeInOut(duration: 0.28)) { discoveryRoute = nil }
                 },
                 onPlay: { playDiscoverySong($0) },
+                favoriteTracks: favoriteSongs.compactMap(\.onlineSong),
                 isFavorite: { song in favorites.contains(stableSongID(song)) },
                 onToggleFavorite: { song in
                     let item = AppSong(id: stableSongID(song), title: song.title, artist: song.artist,
@@ -532,7 +533,7 @@ struct ContentView: View {
                     route: .daily, width: width
                 )
                 recommendationTile(
-                    title: "精选歌曲", subtitle: "遇见更好的自己", icon: "text.alignleft",
+                    title: "我喜欢", subtitle: "好音乐总在心里", icon: "heart.fill",
                     colors: [Color(red: 0.52, green: 0.36, blue: 0.91), Color(red: 0.22, green: 0.12, blue: 0.55)],
                     route: .featuredPick, width: width
                 )

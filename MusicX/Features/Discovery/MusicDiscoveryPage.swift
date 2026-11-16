@@ -44,6 +44,7 @@ struct MusicDiscoveryPage: View {
     let onSelectMainTab: (String) -> Void
     let onClose: (Bool) -> Void
     let onPlay: (MusicSong) -> Void
+    let favoriteTracks: [MusicSong]
     let isFavorite: (MusicSong) -> Bool
     let onToggleFavorite: (MusicSong) -> Void
     let currentSong: MusicSong?
@@ -75,6 +76,7 @@ struct MusicDiscoveryPage: View {
     @State private var playlistUnavailableMessage = ""
     @State private var selectedRecommendationTab: RecommendationTab = .daily
     @State private var recommendationSongCache: [RecommendationTab: [MusicSong]] = [:]
+    @State private var selectedPersonalTab = 0
     private var selectedChart: String {
         if let selectedChartOverride { return selectedChartOverride }
         if case .chart(let name) = route { return name }
@@ -101,8 +103,8 @@ struct MusicDiscoveryPage: View {
 
     private var title: String {
         switch route {
-        case .daily, .featuredPick:
-            selectedRecommendationTab == .daily ? "每日推荐" : "精选歌曲"
+        case .daily: "每日推荐"
+        case .featuredPick: "我喜欢"
         case .playlists: "心情歌单"
         case .featuredPlaylists: "精选歌单"
         case .albums: "热门专辑"
@@ -188,9 +190,8 @@ struct MusicDiscoveryPage: View {
                     VStack(alignment: .leading, spacing: 24) {
                         topBar
                         switch route {
-                        case .daily, .featuredPick:
-                            recommendationTabs
-                            if selectedRecommendationTab == .daily { dailyHeader } else { featuredRecommendationHeader }
+                        case .daily: dailyDiscoveryHeader
+                        case .featuredPick: favoritesDiscoveryHeader
                         case .playlists: playlistIntro
                         case .featuredPlaylists: featuredPlaylistsIntro
                         case .albums: albumsIntro
@@ -201,6 +202,9 @@ struct MusicDiscoveryPage: View {
                         case .album(let title, let artist): albumBanner(title: title, artist: artist)
                         case .musicCategory(let title, let subtitle, let artwork, _):
                             musicCategoryAlbumHeader(title: title, subtitle: subtitle, artwork: artwork)
+                        }
+                        if case .featuredPick = route {
+                            favoriteCategoryTabs
                         }
                         if case .newReleases = route {
                             HStack(spacing: 10) {
@@ -217,6 +221,10 @@ struct MusicDiscoveryPage: View {
                             featuredPlaylistGrid
                         } else if case .albums = route {
                             albumGrid
+                        } else if case .featuredPick = route, selectedPersonalTab == 1 {
+                            myPlaylistsEmptyState
+                        } else if case .featuredPick = route, songs.isEmpty {
+                            favoritesEmptyState
                         } else {
                             if case .charts = route { chartTabs }
                             if case .chart = route { chartTabs }
@@ -252,9 +260,11 @@ struct MusicDiscoveryPage: View {
             closePage(isSwipeBack: true)
         })
         .task(id: route.id) {
-            if case .daily = route { selectedRecommendationTab = .daily }
-            if case .featuredPick = route { selectedRecommendationTab = .featured }
+            if case .featuredPick = route { selectedPersonalTab = 0 }
             await loadSongs()
+        }
+        .onChange(of: favoriteTracks.map(\.id)) { _, _ in
+            if case .featuredPick = route { songs = favoriteTracks }
         }
         .alert("暂未找到匹配歌单", isPresented: $isPlaylistUnavailableAlertPresented) {
             Button("知道了", role: .cancel) {}
@@ -371,7 +381,7 @@ struct MusicDiscoveryPage: View {
 
     private var usesPlaylistDetailAtmosphere: Bool {
         switch route {
-        case .playlistByID, .playlist, .musicCategory, .newReleases:
+        case .playlistByID, .playlist, .musicCategory, .newReleases, .daily, .featuredPick:
             return true
         default: return false
         }
@@ -383,8 +393,6 @@ struct MusicDiscoveryPage: View {
     }
 
     private var isRecommendationRoute: Bool {
-        if case .daily = route { return true }
-        if case .featuredPick = route { return true }
         return false
     }
 
@@ -605,6 +613,89 @@ struct MusicDiscoveryPage: View {
                 .offset(x: 41, y: -36)
         }
         .accessibilityLabel("新歌速递唱片封面")
+    }
+
+    private var dailyDiscoveryHeader: some View {
+        playlistDetailHeader(
+            title: "每日推荐",
+            subtitle: "网易云 + QQ 音乐",
+            countLabel: "每日精选 · \(songs.count) 首",
+            categoryLabel: "每日推荐"
+        ) {
+            newReleasesArtwork
+        }
+    }
+
+    private var favoritesDiscoveryHeader: some View {
+        playlistDetailHeader(
+            title: "我喜欢",
+            subtitle: "好音乐总在心里",
+            countLabel: "收藏歌曲 · \(favoriteTracks.count) 首",
+            categoryLabel: "我的音乐"
+        ) {
+            ZStack {
+                LinearGradient(
+                    colors: [Color(red: 0.59, green: 0.31, blue: 0.79),
+                             Color(red: 0.25, green: 0.15, blue: 0.49)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                )
+                Image(systemName: "heart.fill")
+                    .font(.system(size: 47))
+                    .foregroundStyle(.white.opacity(0.92))
+            }
+        }
+    }
+
+    private var favoriteCategoryTabs: some View {
+        HStack(spacing: 10) {
+            ForEach(0..<2, id: \.self) { index in
+                Button { selectedPersonalTab = index } label: {
+                    Text(index == 0 ? "喜欢的歌曲" : "我的歌单")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(selectedPersonalTab == index ? Color(red: 0.10, green: 0.10, blue: 0.24) : .white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 42)
+                        .background(selectedPersonalTab == index ? Color(red: 0.89, green: 0.88, blue: 0.98) : Color.white.opacity(0.05), in: Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.13), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var favoritesEmptyState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "heart")
+                .font(.system(size: 40, weight: .light))
+                .foregroundStyle(Color(red: 0.75, green: 0.56, blue: 0.92))
+            Text("还没有喜欢的歌曲")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
+            Text("遇见心动的旋律，就把它收藏起来。")
+                .font(.system(size: 13))
+                .foregroundStyle(MusicXTheme.muted)
+            Text("好音乐总在心里。")
+                .font(.system(size: 13))
+                .foregroundStyle(Color(red: 0.81, green: 0.67, blue: 0.92))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 45)
+    }
+
+    private var myPlaylistsEmptyState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "music.note.list")
+                .font(.system(size: 39, weight: .light))
+                .foregroundStyle(Color(red: 0.75, green: 0.56, blue: 0.92))
+            Text("还没有属于你的歌单")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
+            Text("以后可以从网易云、QQ 音乐或酷狗导入。")
+                .font(.system(size: 13))
+                .foregroundStyle(MusicXTheme.muted)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 45)
     }
 
     private var newReleasesHeader: some View {
@@ -1463,6 +1554,8 @@ struct MusicDiscoveryPage: View {
             switch route {
             case .charts, .chart:
                 result = []
+            case .daily:
+                result = try await PlatformCollectionCatalog().firstTwoPlatformRecommendations(count: 50)
             case .newReleases:
                 result = try await catalog.toplist("新歌榜", count: 50)
             case .album(let albumTitle, let albumArtist):
@@ -1480,7 +1573,7 @@ struct MusicDiscoveryPage: View {
                     return categorySeen.insert(key).inserted
                 }
             case .featuredPick:
-                result = []
+                result = favoriteTracks
             case .playlist(let name):
                 result = try await catalog.playlistTracks(keyword: name, count: 50)
             case .playlistByID(let playlist):

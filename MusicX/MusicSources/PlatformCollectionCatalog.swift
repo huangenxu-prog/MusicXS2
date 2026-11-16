@@ -114,49 +114,39 @@ struct PlatformCollectionCatalog {
         return collections
     }
 
-    /// Daily Recommendations use QQ; Featured Songs use NetEase.
-    /// Preserve the platform's recommendation order. Fill from up to five
-    /// consecutive collections only when an earlier one has fewer than count
-    /// distinct title/artist pairs. Do not mix providers or fetch all catalogs.
+    /// Only the first collection is used; do not fill from later playlists.
     func firstCollectionSongs(provider: PlatformCollection.Provider, count: Int = 50) async throws -> [MusicSong] {
         guard count > 0 else { return [] }
         let collections = try await (provider == .qq ? qqRecommendations() : neteaseRecommendations())
-        guard !collections.isEmpty else {
+        guard let first = collections.first else {
             throw MusicSourceError.invalidResponse("平台没有返回推荐合集")
         }
+        return try await tracks(for: first, count: count)
+    }
 
-        var songs: [MusicSong] = []
+    /// Merge the first QQ and the first NetEase playlist, at most 50 unique songs.
+    func firstTwoPlatformRecommendations(count: Int = 50) async throws -> [MusicSong] {
+        guard count > 0 else { return [] }
+        async let qqRows: [MusicSong] = (try? await firstCollectionSongs(provider: .qq, count: count)) ?? []
+        async let neteaseRows: [MusicSong] = (try? await firstCollectionSongs(provider: .netease, count: count)) ?? []
+        let (qq, netease) = await (qqRows, neteaseRows)
+        var combined: [MusicSong] = []
         var seen = Set<String>()
-        for collection in collections.prefix(5) {
+        for index in 0..<max(qq.count, netease.count) {
             try Task.checkCancellation()
-            let remaining = count - songs.count
-            if remaining <= 0 { break }
-
-            // A single unavailable playlist must not prevent the next one
-            // from supplying the missing recommendations.
-            let candidates: [MusicSong]
-            do {
-                candidates = try await tracks(for: collection, count: remaining)
-            } catch {
-                try Task.checkCancellation()
-                continue
-            }
-
-            for song in candidates {
-                let key = (song.title + "|" + song.artist)
+            for candidate in [index < qq.count ? qq[index] : nil,
+                              index < netease.count ? netease[index] : nil].compactMap({ $0 }) {
+                let key = (candidate.title + "|" + candidate.artist)
                     .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
                     .filter { $0.isLetter || $0.isNumber || $0 == "|" }
-                guard seen.insert(key).inserted else { continue }
-                songs.append(song)
-                if songs.count == count { break }
+                if seen.insert(key).inserted { combined.append(candidate) }
+                if combined.count == count { return combined }
             }
-            if songs.count == count { break }
         }
-
-        guard !songs.isEmpty else {
-            throw MusicSourceError.invalidResponse("推荐合集均未返回可用歌曲")
+        guard !combined.isEmpty else {
+            throw MusicSourceError.invalidResponse("QQ 和网易云首个推荐合集均未返回歌曲")
         }
-        return songs
+        return combined
     }
 
     func tracks(for collection: PlatformCollection, count: Int = 50) async throws -> [MusicSong] {
