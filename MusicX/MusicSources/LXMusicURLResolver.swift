@@ -323,6 +323,12 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
                                     try? await MusicResourceEngine(session: session)
                                         .resolveImportedLX(song: candidate, quality: quality)
                                 }
+                                if candidate.source == .netease {
+                                    paths.addTask {
+                                        await MusicResourceEngine(session: session)
+                                            .resolveMatchedNetEase(song: candidate, quality: quality)
+                                    }
+                                }
                                 while let result = await paths.next() {
                                     if let result {
                                         paths.cancelAll()
