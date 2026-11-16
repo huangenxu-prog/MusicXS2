@@ -185,7 +185,9 @@ final class LXSourceScriptHost {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 if let error {
-                    self.finishHTTP(id: requestID, error: error.localizedDescription, response: nil)
+                    let nsError = error as NSError
+                    let detail = "\(error.localizedDescription) [domain=\(nsError.domain), code=\(nsError.code), host=\(target.host ?? "unknown")]"
+                    self.finishHTTP(id: requestID, error: detail, response: nil)
                     return
                 }
                 let http = response as? HTTPURLResponse
