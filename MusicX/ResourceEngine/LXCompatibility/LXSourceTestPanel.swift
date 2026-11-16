@@ -101,9 +101,8 @@ struct LXSourceTestPanel: View {
                     if isResolving { ProgressView("正在解析选中的歌曲…") }
                     if previewURL != nil {
                         Button(previewPlayer == nil ? "试听解析结果" : "停止试听") { togglePreview() }
-                        Button(isProbingURL ? "正在检查地址…" : "诊断播放地址") {
-                            Task { await probePreviewURL() }
-                        }.disabled(isProbingURL)
+                        Text("以实际试听为准；独立 HTTP 探测可能误判可播放地址。")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                     Text("选择平台后搜索并取链。搜索仍使用现有服务，尚未移植洛雪原生搜索模块。")
                         .font(.caption).foregroundStyle(.secondary)
@@ -367,7 +366,7 @@ struct LXSourceTestPanel: View {
                 try? await Task.sleep(for: .seconds(1))
                 guard !Task.isCancelled, previewPlayer === player else { return }
                 if item.status == .failed {
-                    message = "试听失败：\(item.error?.localizedDescription ?? "未知播放器错误")"
+                    message = "试听失败（AVPlayer）：\(item.error?.localizedDescription ?? "未知播放器错误")；地址域名：\(previewURL.host ?? "未知")。解析成功不代表地址可播放。"
                     return
                 }
                 if player.timeControlStatus == .playing {
@@ -377,7 +376,7 @@ struct LXSourceTestPanel: View {
             }
             guard !Task.isCancelled else { return }
             let itemError = item.error?.localizedDescription ?? "无明确错误"
-            message = "12 秒内未开始播放；itemStatus=\(item.status.rawValue)，timeControlStatus=\(player.timeControlStatus.rawValue)，reason=\(player.reasonForWaitingToPlay?.rawValue ?? "无")，error=\(itemError)"
+            message = "12 秒内未开始播放；域名=\(previewURL.host ?? "未知")，itemStatus=\(item.status.rawValue)，timeControlStatus=\(player.timeControlStatus.rawValue)，reason=\(player.reasonForWaitingToPlay?.rawValue ?? "无")，error=\(itemError)"
         }
     }
 
