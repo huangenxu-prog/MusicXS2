@@ -74,7 +74,7 @@ jobs:
           bundle = Path('build/MusicX.xcarchive/Products/Applications/MusicX.app/BundledLXSources.json')
           scripts = json.loads(bundle.read_text())
           assert len(scripts) == 4, 'Built-in LX sources missing from IPA'
-          assert len({s['id'] for s in scripts}) == 4
+          assert {s['id'] for s in scripts} == {'builtin-xinghai', 'builtin-hello-world', 'builtin-fish', 'builtin-hyw'}, 'Wrong LX source identities'
           assert all(s['contents'].strip() for s in scripts)
           print('Verified four bundled LX scripts in archived app')
           PYCODE

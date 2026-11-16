@@ -156,20 +156,14 @@ private struct ImportedLXSourceProvider: MusicResourceProvider {
         }
 
         let scripts = try await MainActor.run { () throws -> [(String, String)] in
-            let library = try LXSourceLibrary()
             var scripts: [(String, String)] = []
             if let url = Bundle.main.url(forResource: "BundledLXSources", withExtension: "json"),
                let data = try? Data(contentsOf: url),
                let bundled = try? JSONDecoder().decode([BundledLXScript].self, from: data) {
                 scripts = bundled.map { ($0.id, $0.contents) }
             }
-            // A corrupt imported file must not disable the built-in suppliers.
-            for id in (try? library.listIdentifiers()) ?? [] {
-                if let script = try? library.load(id: id),
-                   !scripts.contains(where: { $0.1 == script }) {
-                    scripts.append((id, script))
-                }
-            }
+            // Production uses only the four approved bundled scripts.
+            // User imports remain available in the diagnostic panel.
             return scripts
         }
         guard !scripts.isEmpty else {
