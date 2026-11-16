@@ -1315,34 +1315,56 @@ struct ContentView: View {
     }
 
     private func homeSongRow(_ song: AppSong, artworkName: String? = nil) -> some View {
-        Button { selectManually(song) } label: {
-            HStack(spacing: 12) {
-                songArtwork(song.onlineSong, tint: song.tint, size: 44)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(song.title).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white).lineLimit(1).truncationMode(.tail)
-                    Text(song.artist).font(.system(size: 12)).foregroundStyle(MusicXTheme.muted).lineLimit(1).truncationMode(.tail)
-                }.frame(maxWidth: .infinity, alignment: .leading)
-                Text(song.onlineSong?.duration.flatMap { $0 > 0 && $0.isFinite ? playerTime($0) : nil } ?? "--:--")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .monospacedDigit().foregroundStyle(MusicXTheme.muted)
-                    .frame(width: 43, alignment: .trailing)
-                Menu {
-                    Button {
-                        toggleFavorite(song)
-                    } label: {
-                        Label(favorites.contains(song.id) ? "取消收藏" : "收藏歌曲",
-                              systemImage: favorites.contains(song.id) ? "heart.slash" : "heart")
+        HStack(spacing: 12) {
+            Button { selectManually(song) } label: {
+                HStack(spacing: 12) {
+                    songArtwork(song.onlineSong, tint: song.tint, size: 44)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(song.title)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1).truncationMode(.tail)
+                        Text(song.artist)
+                            .font(.system(size: 12))
+                            .foregroundStyle(MusicXTheme.muted)
+                            .lineLimit(1).truncationMode(.tail)
                     }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 18))
-                        .foregroundStyle(MusicXTheme.muted)
-                        .frame(width: 36, height: 42)
-                        .contentShape(Rectangle())
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-            }.contentShape(Rectangle()).padding(.vertical, 7)
-        }.buttonStyle(.plain)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            songRowTime(song)
+            songRowMenu(song)
+        }
+        .padding(.vertical, 7)
+    }
+
+    private func songRowTime(_ song: AppSong) -> some View {
+        Text(song.onlineSong?.duration.flatMap { $0 > 0 && $0.isFinite ? playerTime($0) : nil } ?? "--:--")
+            .font(.system(size: 12, weight: .medium, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(MusicXTheme.muted)
+            .frame(width: 43, alignment: .trailing)
+    }
+
+    private func songRowMenu(_ song: AppSong) -> some View {
+        Menu {
+            Button {
+                toggleFavorite(song)
+            } label: {
+                Label(favorites.contains(song.id) ? "取消收藏" : "收藏歌曲",
+                      systemImage: favorites.contains(song.id) ? "heart.slash" : "heart")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 18))
+                .foregroundStyle(MusicXTheme.muted)
+                .frame(width: 36, height: 42)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("更多操作")
     }
 
     @ViewBuilder
@@ -1359,30 +1381,34 @@ struct ContentView: View {
     }
 
     private func songRow(_ song: AppSong, number: String? = nil, startsSearchQueue: Bool = false) -> some View {
-        HStack(spacing: 13) {
-            songArtwork(song.onlineSong, tint: song.tint, size: 54)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        HStack(spacing: 12) {
             Button { startsSearchQueue ? playSearchResult(song) : selectManually(song) } label: {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(song.title).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
-                    HStack(spacing: 6) {
-                        Text(song.artist).font(.system(size: 12)).foregroundStyle(MusicXTheme.muted).lineLimit(1)
-                        if let source = song.onlineSong?.source,
-                           source == .spotify || source == .youtube || source == .youtubeMusic {
-                            sourceIcon(source)
+                HStack(spacing: 12) {
+                    songArtwork(song.onlineSong, tint: song.tint, size: 54)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(song.title)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1).truncationMode(.tail)
+                        HStack(spacing: 6) {
+                            Text(song.artist)
+                                .font(.system(size: 12))
+                                .foregroundStyle(MusicXTheme.muted)
+                                .lineLimit(1).truncationMode(.tail)
+                            if let source = song.onlineSong?.source,
+                               source == .spotify || source == .youtube || source == .youtubeMusic {
+                                sourceIcon(source)
+                            }
                         }
                     }
-                }.frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            Button { toggleFavorite(song) } label: {
-                Image(systemName: favorites.contains(song.id) ? "heart.fill" : "heart")
-                    .font(.system(size: 17)).foregroundStyle(favorites.contains(song.id) ? MusicXTheme.blue : MusicXTheme.muted)
-            }
-            Button { startsSearchQueue ? playSearchResult(song) : selectManually(song) } label: {
-                Image(systemName: currentSong?.id == song.id && playerStore.isPlaying ? "pause.circle.fill" : "play.circle")
-                    .font(.system(size: 25)).foregroundStyle(.white.opacity(0.85))
-            }
+            songRowTime(song)
+            songRowMenu(song)
         }
     }
 
