@@ -654,25 +654,124 @@ struct ContentView: View {
     }
 
     private var allCollectionsPage: some View {
-        NavigationStack {
-            GeometryReader { proxy in
-                ScrollView {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 20) {
-                        ForEach(homeOfficialCollections) { collection in
-                            officialCollectionTile(collection: collection, width: max(0, (proxy.size.width - 56) / 3))
+        GeometryReader { geometry in
+            let tileWidth = max(0, (geometry.size.width - 56) / 3)
+            ZStack(alignment: .top) {
+                MusicXTheme.background.ignoresSafeArea()
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        allCollectionsHeader
+                        LazyVGrid(
+                            columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3),
+                            spacing: 20
+                        ) {
+                            ForEach(homeOfficialCollections) { collection in
+                                officialCollectionTile(collection: collection, width: tileWidth)
+                            }
                         }
-                    }.padding(16)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 18)
+                        .padding(.bottom, 32)
+                    }
+                }
+                .scrollBounceBehavior(.basedOnSize)
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 36).onEnded { value in
+                        if value.startLocation.x < 38 &&
+                           value.translation.width > 100 &&
+                           abs(value.translation.height) < 65 {
+                            showAllCollections = false
+                        }
+                    }
+                )
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private var allCollectionsHeader: some View {
+        ZStack(alignment: .topLeading) {
+            LinearGradient(
+                stops: [
+                    .init(color: Color(red: 0.09, green: 0.10, blue: 0.24), location: 0),
+                    .init(color: Color(red: 0.24, green: 0.15, blue: 0.39), location: 0.44),
+                    .init(color: Color(red: 0.50, green: 0.20, blue: 0.48), location: 0.74),
+                    .init(color: Color(red: 0.13, green: 0.10, blue: 0.26), location: 1)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .overlay(alignment: .bottom) {
+                // A subtle ambient wave, matching the violet MusicX home palette.
+                GeometryReader { proxy in
+                    Path { path in
+                        let width = proxy.size.width
+                        let height = proxy.size.height
+                        path.move(to: CGPoint(x: 0, y: height * 0.80))
+                        path.addCurve(
+                            to: CGPoint(x: width, y: height * 0.76),
+                            control1: CGPoint(x: width * 0.35, y: height * 1.08),
+                            control2: CGPoint(x: width * 0.75, y: height * 0.47)
+                        )
+                    }
+                    .stroke(
+                        LinearGradient(
+                            colors: [.clear, Color(red: 0.78, green: 0.47, blue: 0.95).opacity(0.8), .white.opacity(0.4)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        ),
+                        lineWidth: 1.4
+                    )
+                    .shadow(color: Color.purple.opacity(0.6), radius: 9)
                 }
             }
-            .background(MusicXTheme.background)
-            .navigationTitle("全部推荐歌单")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { showAllCollections = false }
+            VStack(alignment: .leading, spacing: 0) {
+                Button {
+                    showAllCollections = false
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 42, height: 42)
+                        .background(.white.opacity(0.11), in: Circle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("返回首页")
+                .padding(.bottom, 19)
+
+                HStack(alignment: .center, spacing: 12) {
+                    Text("全部推荐歌单")
+                        .font(.system(size: 30, weight: .bold))
+                        .foregroundStyle(.white)
+                    HStack(alignment: .bottom, spacing: 3) {
+                        ForEach([13.0, 23.0, 34.0, 19.0], id: \.self) { height in
+                            Capsule()
+                                .fill(Color(red: 0.81, green: 0.46, blue: 0.97))
+                                .frame(width: 5, height: height)
+                        }
+                    }
+                    .accessibilityHidden(true)
+                }
+                .minimumScaleFactor(0.8)
+                .lineLimit(1)
+                .padding(.bottom, 10)
+
+                HStack(spacing: 4) {
+                    Text("已为你整理")
+                        .foregroundStyle(.white.opacity(0.83))
+                    Text("\(homeOfficialCollections.count)")
+                        .foregroundStyle(Color(red: 1, green: 0.68, blue: 0.81))
+                    Text("份精选歌单")
+                        .foregroundStyle(.white.opacity(0.83))
+                }
+                .font(.system(size: 14, weight: .medium))
             }
-        }.preferredColorScheme(.dark)
+            .padding(.horizontal, 20)
+            .padding(.top, 15)
+            .padding(.bottom, 36)
+        }
+        .frame(maxWidth: .infinity)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func officialCollectionTile(collection: MusicPlaylist, width: CGFloat) -> some View {
