@@ -259,6 +259,7 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
     /// and artist match is sufficient; duration and album metadata are ignored.
     private func resolveAlternativeSource(song: MusicSong, quality: MusicQuality) async throws -> URL? {
         let service = GDStudioMusicSearchService(session: session)
+        let searchKeyword = AudioSourceTrackMatcher.searchTitle(song.title)
 
         // Search all four supported catalogs concurrently for cross-platform playback.
         // Migu's native search can take up to 12 seconds and its GDStudio
@@ -266,13 +267,13 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
         // already returned by NetEase, QQ, or Kugou.
         async let netease = captureSearch {
             try await MusicXLegacySupplierLibrary(session: session).search(
-                keyword: song.title, source: .netease, page: 1, count: 20,
+                keyword: searchKeyword, source: .netease, page: 1, count: 20,
                 albumOnly: false, useNativeNetEase: true
             )
         }
-        async let kuwo = captureSearch { try await service.search(keyword: song.title, source: .kuwo, count: 12) }
-        async let kugou = captureSearch { try await service.search(keyword: song.title, source: .kugou, count: 12) }
-        async let qq = captureSearch { try await service.search(keyword: song.title, source: .qq, count: 12) }
+        async let kuwo = captureSearch { try await service.search(keyword: searchKeyword, source: .kuwo, count: 12) }
+        async let kugou = captureSearch { try await service.search(keyword: searchKeyword, source: .kugou, count: 12) }
+        async let qq = captureSearch { try await service.search(keyword: searchKeyword, source: .qq, count: 12) }
         let primaryResults = await [netease, kuwo, kugou, qq]
         try Task.checkCancellation()
 
@@ -376,7 +377,7 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
         // search and subsequent GDStudio fallback no longer delay faster sources.
         try Task.checkCancellation()
         let miguResult = await captureSearch {
-            try await service.search(keyword: song.title, source: .migu, count: 12)
+            try await service.search(keyword: searchKeyword, source: .migu, count: 12)
         }
         if let failure = miguResult.1 {
             searchFailures.append(failure)
