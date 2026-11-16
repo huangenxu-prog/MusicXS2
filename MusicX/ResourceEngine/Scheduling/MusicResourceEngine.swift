@@ -143,6 +143,7 @@ private struct ImportedLXSourceProvider: MusicResourceProvider {
     let identifier = "imported-lx-scripts"
     let displayName = "已导入洛雪音源"
     let excludedScriptIDs: Set<String>
+    let excludedURLIDs: Set<String>
 
     func resolve(song: MusicSong, quality: MusicQuality) async throws -> ResolvedMusicResource? {
         let platform: String
@@ -226,6 +227,9 @@ private struct ImportedLXSourceProvider: MusicResourceProvider {
                             source: platform, musicInfo: info, quality: requested, timeout: 15
                         )
                         try Task.checkCancellation()
+                        guard !excludedURLIDs.contains(LXMusicURLResolver.fallbackURLID(url)) else {
+                            return nil
+                        }
                         return ResolvedMusicResource(
                             url: url, providerID: "lx:\(id):\(platform)",
                             providerName: "洛雪导入音源"
@@ -264,8 +268,8 @@ struct MusicResourceEngine {
 
     /// Resolve imported LX scripts for a matched track on its OWN platform.
     /// Used by cross-platform fallback; never re-enters the resource scheduler.
-    func resolveImportedLX(song: MusicSong, quality: MusicQuality) async throws -> URL? {
-        try await ImportedLXSourceProvider(excludedScriptIDs: [])
+    func resolveImportedLX(song: MusicSong, quality: MusicQuality, excludedURLIDs: Set<String> = []) async throws -> URL? {
+        try await ImportedLXSourceProvider(excludedScriptIDs: [], excludedURLIDs: excludedURLIDs)
             .resolve(song: song, quality: quality)?.url
     }
 
@@ -312,20 +316,20 @@ struct MusicResourceEngine {
             // QQ's legacy direct URL services are unreliable and are not part
             // of the 18-channel pool. Imported scripts and matched catalogs race.
             providers = [
-                ImportedLXSourceProvider(excludedScriptIDs: excludingProviderIDs),
+                ImportedLXSourceProvider(excludedScriptIDs: excludingProviderIDs, excludedURLIDs: excludingProviderIDs),
                 CrossPlatformFallbackProvider(session: session, excludedURLIDs: excludingProviderIDs)
             ]
         case .netease:
             providers = [
                 NetEaseNativeAudioProvider(session: session),
                 KumonePyncmdAudioSourceProvider(),
-                ImportedLXSourceProvider(excludedScriptIDs: excludingProviderIDs),
+                ImportedLXSourceProvider(excludedScriptIDs: excludingProviderIDs, excludedURLIDs: excludingProviderIDs),
                 CrossPlatformFallbackProvider(session: session, excludedURLIDs: excludingProviderIDs)
             ]
         default:
             providers = [
                 MusicXLegacySupplierLibrary(session: session),
-                ImportedLXSourceProvider(excludedScriptIDs: excludingProviderIDs),
+                ImportedLXSourceProvider(excludedScriptIDs: excludingProviderIDs, excludedURLIDs: excludingProviderIDs),
                 CrossPlatformFallbackProvider(session: session, excludedURLIDs: excludingProviderIDs)
             ]
         }
