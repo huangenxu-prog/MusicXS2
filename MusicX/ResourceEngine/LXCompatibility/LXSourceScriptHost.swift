@@ -64,7 +64,7 @@ final class LXSourceScriptHost {
         }
         // LX scripts may verify their own raw source against server-provided MD5.
         // The metadata must describe the actual imported JS, not a placeholder.
-        let versionPattern = #"@version\\s+([^\\s*]+)"#
+        let versionPattern = #"@version\s+([^\s*]+)"#
         let scriptVersion: String
         if let range = script.range(of: versionPattern, options: .regularExpression) {
             scriptVersion = script[range].split(whereSeparator: { $0.isWhitespace }).last.map(String.init) ?? "1"
