@@ -78,6 +78,32 @@ struct MusicPlaylist: Identifiable, Codable, Hashable, Sendable {
     var id: String { "\(source.rawValue):playlist:\(sourceID)" }
 }
 
+/// Saved imported playlist data, including its original track ordering.
+/// Local renaming is independent of the original platform title.
+struct ImportedPlaylistSnapshot: Codable, Identifiable {
+    let playlist: MusicPlaylist
+    let songs: [MusicSong]
+    var customName: String? = nil
+
+    var id: String { playlist.id }
+    var displayName: String { customName ?? playlist.name }
+    var displayPlaylist: MusicPlaylist {
+        MusicPlaylist(source: playlist.source, sourceID: playlist.sourceID,
+                      name: displayName, creator: playlist.creator,
+                      description: playlist.description, artworkURL: playlist.artworkURL,
+                      trackCount: playlist.trackCount, provenance: playlist.provenance)
+    }
+}
+
+/// Versioned portable metadata backup (no audio files).
+struct MusicXBackup: Codable {
+    let format: String
+    let version: Int
+    let createdAt: Date
+    let favoriteSongs: [MusicSong]
+    let importedPlaylists: [ImportedPlaylistSnapshot]
+}
+
 /// IDs are source-specific. Never pass a QQ mid to a NetEase resolver.
 struct MusicSong: Identifiable, Codable, Hashable, Sendable {
     var id: String { "\(source.rawValue):\(sourceID)" }

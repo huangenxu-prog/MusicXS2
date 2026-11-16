@@ -1,5 +1,26 @@
 import SwiftUI
 import AVFoundation
+import UniformTypeIdentifiers
+
+/// A JSON document that can be exported using the iOS Files/share system.
+private struct MusicXBackupDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+    static var writableContentTypes: [UTType] { [.json] }
+    var contents: Data
+
+    init(contents: Data) { self.contents = contents }
+
+    init(configuration: ReadConfiguration) throws {
+        guard let data = configuration.file.regularFileContents else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        contents = data
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: contents)
+    }
+}
 
 private enum MainTab: String, CaseIterable {
     case home = "首页"
@@ -143,6 +164,12 @@ struct ContentView: View {
     @AppStorage("musicx.recentIDs") private var recentIDs = ""
     @AppStorage("musicx.recentSongs") private var recentSongsJSON = "[]"
     @AppStorage("musicx.favoriteSongs") private var favoriteSongsJSON = "[]"
+    @AppStorage("musicx.importedPlaylists.v1") private var importedPlaylistsJSON = "[]"
+    @State private var backupDocument: MusicXBackupDocument?
+    @State private var isBackupExportPresented = false
+    @State private var isBackupImportPresented = false
+    @State private var isBackupNoticePresented = false
+    @State private var backupNotice = ""
     @AppStorage("musicx.playbackQuality") private var playbackQualityRaw = MusicQuality.high.rawValue
 
     private var selectedMusicQuality: MusicQuality {
@@ -264,6 +291,39 @@ struct ContentView: View {
 
     private var finalAppView: some View {
         presentationView
+            .fileExporter(isPresented: $isBackupExportPresented,
+                          document: backupDocument,
+                          contentType: .json,
+                          defaultFilename: "MusicXS2-Backup") { result in
+                if case .failure(let error) = result {
+                    backupNotice = "导出失败：\(error.localizedDescription)"
+                    isBackupNoticePresented = true
+                }
+            }
+            .fileImporter(isPresented: $isBackupImportPresented,
+                          allowedContentTypes: [.json],
+                          allowsMultipleSelection: false) { result in
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first else { return }
+                    let accessible = url.startAccessingSecurityScopedResource()
+                    defer { if accessible { url.stopAccessingSecurityScopedResource() } }
+                    do {
+                        try restoreMusicBackup(Data(contentsOf: url))
+                    } catch {
+                        backupNotice = "恢复失败：\(error.localizedDescription)"
+                        isBackupNoticePresented = true
+                    }
+                case .failure(let error):
+                    backupNotice = "文件选择失败：\(error.localizedDescription)"
+                    isBackupNoticePresented = true
+                }
+            }
+            .alert("音乐数据备份", isPresented: $isBackupNoticePresented) {
+                Button("知道了", role: .cancel) {}
+            } message: {
+                Text(backupNotice)
+            }
             .onChange(of: discoveryRoute?.id) { oldValue, newValue in
                 if oldValue == nil && newValue != nil { isDiscoveryPopping = false }
             }
@@ -1111,6 +1171,26 @@ struct ContentView: View {
                         LXSourceTestPanel()
                             .preferredColorScheme(.dark)
                     }
+                    Menu {
+                        Button {
+                            exportMusicBackup()
+                        } label: {
+                            Label("导出音乐收藏", systemImage: "square.and.arrow.up")
+                        }
+                        Button {
+                            isBackupImportPresented = true
+                        } label: {
+                            Label("恢复音乐收藏", systemImage: "square.and.arrow.down")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 21, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.92))
+                            .frame(width: 44, height: 44)
+                            .background(Color(red: 0.075, green: 0.09, blue: 0.17), in: Circle())
+                            .overlay(Circle().stroke(Color(red: 0.19, green: 0.23, blue: 0.43), lineWidth: 1))
+                    }
+                    .accessibilityLabel("音乐数据备份")
                 }
 
                 HStack(spacing: 8) {
@@ -2591,6 +2671,63 @@ struct ContentView: View {
             ($0 ^ UInt64($1)) &* 1099511628211
         }
         return Int(hash & 0x7FFFFFFFFFFFFFFF)
+    }
+
+    private func exportMusicBackup() {
+        let storedFavorites = decodeLibrarySongs(favoriteSongsJSON)
+        let savedPlaylists = (try? JSONDecoder().decode(
+            [ImportedPlaylistSnapshot].self,
+            from: Data(importedPlaylistsJSON.utf8)
+        )) ?? []
+        let backup = MusicXBackup(
+            format: "MusicXS2.music-backup", version: 1, createdAt: Date(),
+            favoriteSongs: storedFavorites, importedPlaylists: savedPlaylists
+        )
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            encoder.dateEncodingStrategy = .iso8601
+            backupDocument = MusicXBackupDocument(contents: try encoder.encode(backup))
+            isBackupExportPresented = true
+        } catch {
+            backupNotice = "导出失败：\(error.localizedDescription)"
+            isBackupNoticePresented = true
+        }
+    }
+
+    private func restoreMusicBackup(_ data: Data) throws {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let backup = try decoder.decode(MusicXBackup.self, from: data)
+        guard backup.format == "MusicXS2.music-backup", backup.version == 1 else {
+            throw MusicSourceError.invalidResponse("不是兼容的 MusicXS2 备份文件")
+        }
+        // Prepare BOTH merged values before changing either stored key.
+        var seenSongIDs = Set<String>()
+        let existingSongs = decodeLibrarySongs(favoriteSongsJSON)
+        let restoredSongs = (existingSongs + backup.favoriteSongs).filter {
+            seenSongIDs.insert($0.id).inserted
+        }
+        var playlists = (try? JSONDecoder().decode(
+            [ImportedPlaylistSnapshot].self,
+            from: Data(importedPlaylistsJSON.utf8)
+        )) ?? []
+        for item in backup.importedPlaylists where !playlists.contains(where: { $0.id == item.id }) {
+            playlists.append(item)
+        }
+        let newFavorites = try JSONEncoder().encode(restoredSongs)
+        let newPlaylists = try JSONEncoder().encode(playlists)
+        guard let favoriteText = String(data: newFavorites, encoding: .utf8),
+              let playlistText = String(data: newPlaylists, encoding: .utf8) else {
+            throw MusicSourceError.invalidResponse("备份内容无法编码")
+        }
+        var restoredIDs = favorites
+        for song in restoredSongs { restoredIDs.insert(stableSongID(song)) }
+        favoriteSongsJSON = favoriteText
+        favoriteIDs = restoredIDs.sorted().map(String.init).joined(separator: ",")
+        importedPlaylistsJSON = playlistText
+        backupNotice = "恢复完成：当前共 \(restoredSongs.count) 首收藏歌曲、\(playlists.count) 个导入歌单。原有数据已保留。"
+        isBackupNoticePresented = true
     }
 
     private func toggleFavorite(_ song: AppSong) {

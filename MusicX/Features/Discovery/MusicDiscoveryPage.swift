@@ -26,14 +26,6 @@ enum MusicDiscoveryRoute: Identifiable {
     }
 }
 
-/// Local snapshot keeps imported song order and IDs independent of later
-/// playlist changes, platform availability, and audio-resolution providers.
-private struct ImportedPlaylistSnapshot: Codable, Identifiable {
-    let playlist: MusicPlaylist
-    let songs: [MusicSong]
-    var id: String { playlist.id }
-}
-
 private struct PlaylistCardItem {
     let title: String
     let subtitle: String
@@ -91,6 +83,9 @@ struct MusicDiscoveryPage: View {
     @State private var qqImportPreview: ImportedPlaylistSnapshot?
     @State private var qqImportError: String?
     @State private var isQQImportLoading = false
+    @State private var renamingPlaylistID: String?
+    @State private var renamingPlaylistName = ""
+    @State private var isRenamePlaylistPresented = false
 
     private var importedPlaylists: [ImportedPlaylistSnapshot] {
         guard let data = importedPlaylistsJSON.data(using: .utf8) else { return [] }
@@ -284,6 +279,13 @@ struct MusicDiscoveryPage: View {
         }
         .onChange(of: favoriteTracks.map(\.id)) { _, _ in
             if case .featuredPick = route { songs = favoriteTracks }
+        }
+        .alert("修改歌单名称", isPresented: $isRenamePlaylistPresented) {
+            TextField("歌单名称", text: $renamingPlaylistName)
+            Button("取消", role: .cancel) { renamingPlaylistID = nil }
+            Button("保存") { renameImportedPlaylist() }
+        } message: {
+            Text("仅修改 MusicXS2 中显示的名称，不影响 QQ 音乐原歌单。")
         }
         .sheet(isPresented: $isQQImportPresented) {
             qqImportSheet
@@ -716,7 +718,7 @@ struct MusicDiscoveryPage: View {
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 12),
                                 GridItem(.flexible(), spacing: 12)], spacing: 18) {
                 ForEach(importedPlaylists) { item in
-                    Button { onOpenPlaylist(item.playlist) } label: {
+                    Button { onOpenPlaylist(item.displayPlaylist) } label: {
                         VStack(alignment: .leading, spacing: 7) {
                             Group {
                                 if let cover = item.playlist.artworkURL {
@@ -733,7 +735,7 @@ struct MusicDiscoveryPage: View {
                             }
                             .frame(width: width, height: width)
                             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            Text(item.playlist.name)
+                            Text(item.displayName)
                                 .font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(.white)
                                 .lineLimit(1)
@@ -745,6 +747,15 @@ struct MusicDiscoveryPage: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        Button {
+                            renamingPlaylistID = item.id
+                            renamingPlaylistName = item.displayName
+                            isRenamePlaylistPresented = true
+                        } label: {
+                            Label("重命名", systemImage: "pencil")
+                        }
+                    }
                 }
             }
         }
@@ -851,7 +862,9 @@ struct MusicDiscoveryPage: View {
     private func saveQQImport(_ newItem: ImportedPlaylistSnapshot) {
         var items = importedPlaylists
         if let index = items.firstIndex(where: { $0.id == newItem.id }) {
-            items[index] = newItem
+            var updated = newItem
+            updated.customName = items[index].customName
+            items[index] = updated
         } else {
             items.insert(newItem, at: 0)
         }
@@ -865,6 +878,19 @@ struct MusicDiscoveryPage: View {
         } catch {
             qqImportError = "保存失败：\(error.localizedDescription)"
         }
+    }
+
+    private func renameImportedPlaylist() {
+        guard let id = renamingPlaylistID else { return }
+        defer { renamingPlaylistID = nil }
+        let name = renamingPlaylistName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.count <= 100 else { return }
+        var items = importedPlaylists
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        items[index].customName = name
+        guard let data = try? JSONEncoder().encode(items),
+              let text = String(data: data, encoding: .utf8) else { return }
+        importedPlaylistsJSON = text
     }
 
     private var favoritesEmptyState: some View {
