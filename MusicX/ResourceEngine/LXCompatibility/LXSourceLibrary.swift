@@ -29,6 +29,7 @@ final class LXSourceLibrary {
     }
 
     private let selectedKey = "musicx.lx.selected-source.v1"
+    private let approvedKey = "musicx.lx.approved-source-ids.v1"
     private let directory: URL
     private let maximumSize = 2 * 1024 * 1024
 
@@ -82,6 +83,17 @@ final class LXSourceLibrary {
         set { UserDefaults.standard.set(newValue, forKey: selectedKey) }
     }
 
+    var approvedIDs: Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: approvedKey) ?? [])
+    }
+
+    func approve(id: String) throws {
+        _ = try load(id: id)
+        var ids = approvedIDs
+        ids.insert(id.lowercased())
+        UserDefaults.standard.set(Array(ids).sorted(), forKey: approvedKey)
+    }
+
     func select(id: String) throws {
         let url = try scriptURL(for: id)
         guard FileManager.default.fileExists(atPath: url.path) else { throw LibraryError.invalidIdentifier }
@@ -111,6 +123,9 @@ final class LXSourceLibrary {
     }
 
     func remove(id: String) throws {
+        var ids = approvedIDs
+        ids.remove(id.lowercased())
+        UserDefaults.standard.set(Array(ids).sorted(), forKey: approvedKey)
         try FileManager.default.removeItem(at: scriptURL(for: id))
         let nameURL = directory.appendingPathComponent(id.lowercased()).appendingPathExtension("name")
         try? FileManager.default.removeItem(at: nameURL)
