@@ -199,30 +199,18 @@ final class LXSourceLibrary {
         return archive.imported.count
     }
 
-    func isJiexiang(id: String) -> Bool {
-        guard let script = try? load(id: id) else { return false }
-        let header = String(script.prefix(4096)).lowercased()
-        return header.contains("@homepage https://github.com/haonanren118/jiexiang-music-source")
-            && header.contains("@name 杰翔聚合音源")
-    }
-
     func enabledPlatforms(id: String) -> Set<String> {
         let id = id.lowercased()
         let defaults: Set<String> = (isBundled(id: id) || approvedIDs.contains(id))
             ? Self.playbackPlatforms : []
         var enabled = Set(platformOverrides[id] ?? Array(defaults))
             .intersection(Self.playbackPlatforms)
-        // Known invalid QQ prompt audio must never reach formal playback.
-        if isJiexiang(id: id) { enabled.remove("tx") }
         return enabled
     }
 
     func setPlatformEnabled(id: String, platform: String, enabled: Bool) throws {
         guard Self.playbackPlatforms.contains(platform) else { throw LibraryError.invalidIdentifier }
         _ = try load(id: id)
-        if enabled && platform == "tx" && isJiexiang(id: id) {
-            throw LibraryError.invalidIdentifier
-        }
         var current = enabledPlatforms(id: id)
         if enabled {
             current.insert(platform)
