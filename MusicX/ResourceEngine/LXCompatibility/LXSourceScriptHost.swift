@@ -206,7 +206,18 @@ final class LXSourceScriptHost {
                 request.setValue(String(describing: value), forHTTPHeaderField: key)
             }
         }
-        if let body = opts["body"] as? String { request.httpBody = Data(body.utf8) }
+        if let body = opts["body"] as? String {
+            request.httpBody = Data(body.utf8)
+        } else if let body = opts["body"],
+                  JSONSerialization.isValidJSONObject(body),
+                  let encoded = try? JSONSerialization.data(withJSONObject: body) {
+            // LX scripts may pass a plain object as POST body. Previously this
+            // produced an empty request, causing API-specific false failures.
+            request.httpBody = encoded
+            if request.value(forHTTPHeaderField: "Content-Type") == nil {
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            }
+        }
         if let timeout = opts["timeout"] as? NSNumber {
             request.timeoutInterval = max(1, timeout.doubleValue / 1000)
         }
