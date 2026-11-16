@@ -99,12 +99,8 @@ struct LXSourceTestPanel: View {
                                     )) {
                                         HStack(spacing: 6) {
                                             Text(platformDisplayName(platform))
-                                            if platform == "tx" && ((try? getLibrary().isJiexiang(id: id)) == true) {
-                                                Text("已知失效").font(.caption2).foregroundStyle(.secondary)
-                                            }
                                         }
                                     }
-                                    .disabled(platform == "tx" && ((try? getLibrary().isJiexiang(id: id)) == true))
                                 }
                                 Text("仅控制这条音源的正式播放通道；新导入音源需先试听通过，勾选才会生效。")
                                     .font(.caption2).foregroundStyle(.secondary)
