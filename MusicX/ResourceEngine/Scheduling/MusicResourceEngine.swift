@@ -308,9 +308,9 @@ struct MusicResourceEngine {
         let providers: [any MusicResourceProvider]
         switch song.source {
         case .qq:
+            // QQ's legacy direct URL services are unreliable and are not part
+            // of the 18-channel pool. Imported scripts and matched catalogs race.
             providers = [
-                QQGDStudioAudioProvider(session: session),
-                QQChkszAudioProvider(session: session),
                 ImportedLXSourceProvider(excludedScriptIDs: excludingProviderIDs),
                 CrossPlatformFallbackProvider(session: session)
             ]
