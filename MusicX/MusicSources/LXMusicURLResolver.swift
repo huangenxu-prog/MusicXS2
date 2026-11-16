@@ -362,8 +362,13 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
             }
         }
 
-        // Try matching results from NetEase, Kuwo, Kugou, and QQ immediately.
-        if let url = try await resolveCandidates(makeCandidates(from: primaryResults.map { $0.0 })) {
+        // Prefer the requested recording over a faster live/re-recorded variant.
+        // Alternate editions compete only after all standard-edition URLs fail.
+        let matched = makeCandidates(from: primaryResults.map { $0.0 })
+        if let url = try await resolveCandidates(matched.filter { $0.1 >= 80 }) {
+            return url
+        }
+        if let url = try await resolveCandidates(matched.filter { $0.1 < 80 }) {
             return url
         }
 
