@@ -260,14 +260,15 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
     private func resolveAlternativeSource(song: MusicSong, quality: MusicQuality) async throws -> URL? {
         let service = GDStudioMusicSearchService(session: session)
 
-        // Keep the three general-purpose catalogs on the critical path.
+        // Search all four supported catalogs concurrently for cross-platform playback.
         // Migu's native search can take up to 12 seconds and its GDStudio
         // fallback can add another 12 seconds, so it must not block results
         // already returned by NetEase, QQ, or Kugou.
         async let netease = captureSearch { try await service.search(keyword: song.title, source: .netease, count: 12) }
-        async let qq = captureSearch { try await service.search(keyword: song.title, source: .qq, count: 12) }
+        async let kuwo = captureSearch { try await service.search(keyword: song.title, source: .kuwo, count: 12) }
         async let kugou = captureSearch { try await service.search(keyword: song.title, source: .kugou, count: 12) }
-        let primaryResults = await [netease, qq, kugou]
+        async let qq = captureSearch { try await service.search(keyword: song.title, source: .qq, count: 12) }
+        let primaryResults = await [netease, kuwo, kugou, qq]
         try Task.checkCancellation()
 
         var searchFailures = primaryResults.compactMap { $0.1 }
@@ -323,7 +324,7 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
             return nil
         }
 
-        // Try matching results from NetEase, QQ, and Kugou immediately.
+        // Try matching results from NetEase, Kuwo, Kugou, and QQ immediately.
         if let url = try await resolveCandidates(makeCandidates(from: primaryResults.map { $0.0 })) {
             return url
         }
