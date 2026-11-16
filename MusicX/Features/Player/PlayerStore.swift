@@ -303,7 +303,7 @@ final class PlayerStore: ObservableObject {
     func play(url: URL, title: String, artist: String, album: String? = nil,
               artworkURL: URL? = nil, artworkSong: MusicSong? = nil,
               diagnosticID: String? = nil, requestedAt: Date? = nil,
-              diagnosticSource: String? = nil) {
+              diagnosticSource: String? = nil, startAt: TimeInterval = 0) {
         errorMessage = nil
         activePlaybackDiagnosticID = diagnosticID
         activePlaybackRequestedAt = requestedAt
@@ -359,7 +359,19 @@ final class PlayerStore: ObservableObject {
         isPlaying = false
         isBuffering = true
         recordDiagnostic("play-request")
-        player.playImmediately(atRate: 1.0)
+        if startAt.isFinite && startAt > 0 {
+            item.seek(to: CMTime(seconds: startAt, preferredTimescale: 600),
+                      toleranceBefore: .zero, toleranceAfter: .zero) { [weak self, weak item] finished in
+                Task { @MainActor in
+                    guard let self, let item, self.player.currentItem === item else { return }
+                    if finished { self.currentTime = startAt }
+                    if self.wantsPlayback { self.player.playImmediately(atRate: 1.0) }
+                    self.updateNowPlayingInfo()
+                }
+            }
+        } else {
+            player.playImmediately(atRate: 1.0)
+        }
         updateNowPlayingInfo()
     }
 

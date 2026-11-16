@@ -111,6 +111,11 @@ struct ContentView: View {
     @State private var libraryFilter: LibraryFilter = .recent
     @State private var libraryContentType: LibraryContentType = .songs
     @State private var isLocalMusicAlertPresented = false
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var restoredPosition: TimeInterval?
+    @State private var didRestorePlayback = false
+    @State private var lastSavedPlaybackSecond = -1
+    @State private var showAllCollections = false
     @State private var currentSong: AppSong?
     @State private var isSeekingProgress = false
     @State private var seekPreviewTime: TimeInterval = 0
@@ -256,6 +261,21 @@ struct ContentView: View {
             .onChange(of: discoveryRoute?.id) { oldValue, newValue in
                 if oldValue == nil && newValue != nil { isDiscoveryPopping = false }
             }
+            .onAppear { restorePlaybackSession() }
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active { savePlaybackSession() }
+            }
+            .onChange(of: playerStore.currentTime) { _, time in
+                guard time.isFinite else { return }
+                let second = Int(time)
+                if second / 5 != lastSavedPlaybackSecond / 5 {
+                    savePlaybackSession()
+                    lastSavedPlaybackSecond = second
+                }
+            }
+            .onChange(of: playerStore.isPlaying) { _, _ in savePlaybackSession() }
+            .onChange(of: playbackQueueSongs.map(\.id)) { _, _ in savePlaybackSession() }
+            .sheet(isPresented: $showAllCollections) { allCollectionsPage }
             .task { await loadHomeSongs() }
             .task { await loadOfficialCollections() }
     }
@@ -355,7 +375,7 @@ struct ContentView: View {
                 onPlay: { playDiscoverySong($0) },
                 currentSong: currentSong?.onlineSong,
                 isPlaying: playerStore.isPlaying,
-                onTogglePlayback: { playerStore.togglePlayback() },
+                onTogglePlayback: { toggleCurrentPlayback() },
                 onOpenPlayer: { isPlayerPresented = true },
                 onPrevious: { stepSong(by: -1) },
                 onNext: { stepSong(by: 1) },
@@ -594,7 +614,7 @@ struct ContentView: View {
 
     private var officialCollectionsGridHeight: CGFloat {
         let columns = 3
-        let rows = (homeOfficialCollections.count + columns - 1) / columns
+        let rows = (min(homeOfficialCollections.count, 9) + columns - 1) / columns
         let cellWidth = max(0, (UIScreen.main.bounds.width - 28 - 24) / CGFloat(columns))
         let rowSpacing = CGFloat(max(0, rows - 1)) * 14
         let rowContentHeight = CGFloat(rows) * 44
@@ -611,6 +631,12 @@ struct ContentView: View {
                     Capsule().fill(MusicXTheme.blue).frame(width: 3, height: 21)
                     Text("推荐歌单").font(.system(size: 20, weight: .bold)).foregroundStyle(.white)
                     Spacer()
+                    Button { showAllCollections = true } label: {
+                        HStack(spacing: 6) {
+                            Text("查看全部")
+                            Image(systemName: "chevron.right")
+                        }.font(.system(size: 13)).foregroundStyle(MusicXTheme.muted)
+                    }.buttonStyle(.plain)
                 }
                 .padding(.horizontal, 14)
 
@@ -622,7 +648,7 @@ struct ContentView: View {
                         alignment: .center,
                         spacing: 14
                     ) {
-                        ForEach(homeOfficialCollections) { collection in
+                        ForEach(Array(homeOfficialCollections.prefix(9))) { collection in
                             officialCollectionTile(collection: collection, width: width)
                         }
                     }
@@ -634,8 +660,31 @@ struct ContentView: View {
         }
     }
 
+    private var allCollectionsPage: some View {
+        NavigationStack {
+            GeometryReader { proxy in
+                ScrollView {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 20) {
+                        ForEach(homeOfficialCollections) { collection in
+                            officialCollectionTile(collection: collection, width: max(0, (proxy.size.width - 56) / 3))
+                        }
+                    }.padding(16)
+                }
+            }
+            .background(MusicXTheme.background)
+            .navigationTitle("全部推荐歌单")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { showAllCollections = false }
+                }
+            }
+        }.preferredColorScheme(.dark)
+    }
+
     private func officialCollectionTile(collection: MusicPlaylist, width: CGFloat) -> some View {
         Button {
+            showAllCollections = false
             discoveryRoute = .playlistByID(collection)
         } label: {
             VStack(alignment: .leading, spacing: 7) {
@@ -1255,7 +1304,7 @@ struct ContentView: View {
                 Image(systemName: "backward.end.fill").font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.92)).frame(width: 30, height: 46)
             }.buttonStyle(.plain).disabled(playbackQueue.isEmpty)
-            Button { if currentSong != nil { playerStore.togglePlayback() } } label: {
+            Button { if currentSong != nil { toggleCurrentPlayback() } } label: {
                 Group {
                     if isResolvingSong || playerStore.isBuffering { ProgressView().tint(.white) }
                     else { Image(systemName: playerStore.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 19, weight: .bold)).foregroundStyle(.white) }
@@ -1419,7 +1468,7 @@ struct ContentView: View {
                             Image(systemName: "backward.end.fill").font(.system(size: 27))
                                 .foregroundStyle(.white).frame(maxWidth: .infinity)
                         }
-                        Button { if currentSong != nil { playerStore.togglePlayback() } } label: {
+                        Button { if currentSong != nil { toggleCurrentPlayback() } } label: {
                             Group {
                                 if isResolvingSong || playerStore.isBuffering {
                                     ProgressView().tint(MusicXTheme.background)
@@ -1983,6 +2032,45 @@ struct ContentView: View {
         selectManually(appSong)
     }
 
+    private struct PlaybackSession: Codable {
+        let song: MusicSong
+        let queue: [MusicSong]
+        let position: TimeInterval
+    }
+
+    private func restorePlaybackSession() {
+        guard !didRestorePlayback else { return }
+        didRestorePlayback = true
+        guard currentSong == nil,
+              let data = UserDefaults.standard.data(forKey: "musicx.playback-session.v1"),
+              let saved = try? JSONDecoder().decode(PlaybackSession.self, from: data) else { return }
+        func appSong(_ song: MusicSong) -> AppSong {
+            AppSong(id: stableSongID(song), title: song.title, artist: song.artist,
+                    album: song.album ?? "", tint: MusicXTheme.blue, onlineSong: song)
+        }
+        currentSong = appSong(saved.song)
+        playbackQueueSongs = saved.queue.map(appSong)
+        hasCustomPlaybackQueue = true
+        restoredPosition = saved.position.isFinite ? max(0, saved.position) : 0
+    }
+
+    private func savePlaybackSession() {
+        guard didRestorePlayback, !isResolvingSong, !playerStore.isBuffering,
+              playerStore.errorMessage == nil, let song = currentSong?.onlineSong else { return }
+        let time = restoredPosition ?? playerStore.currentTime
+        let snapshot = PlaybackSession(song: song, queue: playbackQueue.compactMap(\.onlineSong),
+                                       position: time.isFinite ? max(0, time) : 0)
+        if let data = try? JSONEncoder().encode(snapshot) {
+            UserDefaults.standard.set(data, forKey: "musicx.playback-session.v1")
+        }
+    }
+
+    private func toggleCurrentPlayback() {
+        guard let song = currentSong, !isResolvingSong else { return }
+        if restoredPosition != nil { select(song) }
+        else { playerStore.togglePlayback() }
+    }
+
     private func selectManually(_ song: AppSong) {
         // Tapping the current track only toggles playback; it must not discard
         // the user's shuffle back/forward navigation path.
@@ -1997,7 +2085,9 @@ struct ContentView: View {
             failedPlaybackSongIDs.removeAll()
             playbackRetryCounts.removeAll()
         }
-        if currentSong?.id == song.id && playerStore.errorMessage == nil {
+        let resumePosition = currentSong?.id == song.id ? (restoredPosition ?? 0) : 0
+        let needsRestore = restoredPosition != nil
+        if currentSong?.id == song.id && playerStore.errorMessage == nil && !needsRestore {
             if playerStore.isPlaying { playerStore.pause() }
             else if isResolvingSong { return }
             else { playerStore.resume() }
@@ -2018,6 +2108,7 @@ struct ContentView: View {
             // ownership while the next stream URL resolves.
             playerStore.pauseForTrackChange()
             currentSong = song
+            restoredPosition = nil
             isResolvingSong = true
             playbackTask = Task {
                 defer {
@@ -2051,7 +2142,8 @@ struct ContentView: View {
                     playerStore.play(url: url, title: onlineSong.title, artist: onlineSong.artist,
                                      album: onlineSong.album, artworkURL: onlineSong.artworkURL,
                                      artworkSong: onlineSong, diagnosticID: playbackDiagnosticID,
-                                     requestedAt: playbackStartedAt, diagnosticSource: onlineSong.source.rawValue)
+                                     requestedAt: playbackStartedAt, diagnosticSource: onlineSong.source.rawValue,
+                                     startAt: resumePosition)
                     prefetchUpcomingTracks(after: song)
                 } catch is CancellationError {
                     return
