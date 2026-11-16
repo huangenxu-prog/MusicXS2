@@ -101,6 +101,14 @@ final class LXSourceScriptHost {
         context.setObject(network, forKeyedSubscript: "__lxHTTP" as NSString)
         context.setObject(complete, forKeyedSubscript: "__lxComplete" as NSString)
         context.setObject(registration, forKeyedSubscript: "__lxSend" as NSString)
+        let log: @convention(block) (String, String) -> Void = { [weak self] level, message in
+            guard let self else { return }
+            self.initializationEvents.append("console.\(level): \(String(message.prefix(400)))")
+            if self.initializationEvents.count > 120 {
+                self.initializationEvents.removeFirst(self.initializationEvents.count - 120)
+            }
+        }
+        context.setObject(log, forKeyedSubscript: "__lxLog" as NSString)
         context.evaluateScript(Self.bootstrap)
         guard context.evaluateScript("typeof setTimeout === 'function' && typeof clearTimeout === 'function'")?.toBool() == true else {
             throw HostError.initialization("LX timer preflight failed: \(lastError ?? "no JS exception")")
@@ -257,6 +265,14 @@ final class LXSourceScriptHost {
     private static let bootstrap = #"""
     (function () {
       const handlers = {};
+      // Community LX scripts commonly use console.error and inspect err.message.
+      // JSContext has no browser console; expose bounded diagnostics instead.
+      globalThis.console = {
+        log: function () { __lxLog('log', Array.from(arguments).map(String).join(' ')); },
+        warn: function () { __lxLog('warn', Array.from(arguments).map(String).join(' ')); },
+        error: function () { __lxLog('error', Array.from(arguments).map(String).join(' ')); },
+        info: function () { __lxLog('info', Array.from(arguments).map(String).join(' ')); }
+      };
       globalThis.setTimeout = function (callback, delay) {
         if (typeof callback !== 'function') throw new TypeError('setTimeout callback must be a function');
         return __lxSetTimeout(callback, Number(delay) || 0);
@@ -274,7 +290,15 @@ final class LXSourceScriptHost {
         request: function (url, options, callback) {
           if (typeof options === 'function') { callback = options; options = {}; }
           if (typeof callback !== "function") throw new Error("lx.request requires callback");
-          __lxHTTP(url, options || {}, callback);
+          return __lxHTTP(url, options || {}, function (err, response, body) {
+            // The LX callback contract expects a JS Error, not a native string.
+            // Preserve the original details for scripts reading error.message.
+            if (err != null && err !== '') {
+              callback(err instanceof Error ? err : new Error(String(err)), response, body);
+            } else {
+              callback(null, response, body);
+            }
+          });
         },
         utils: {
           crypto: {
