@@ -10,6 +10,8 @@ struct LXSourceTestPanel: View {
     @State private var remoteScriptURL = ""
     @State private var isImportingRemote = false
     @State private var importedIDs: [String] = []
+    @State private var expandedID: String?
+    @State private var platformSelections: [String: Set<String>] = [:]
     @State private var message: String?
     @State private var selectedID: String?
     @State private var library: LXSourceLibrary?
@@ -34,34 +36,63 @@ struct LXSourceTestPanel: View {
                         Text("尚未导入 JS 音源").foregroundStyle(.secondary)
                     }
                     ForEach(importedIDs, id: \.self) { id in
-                        HStack {
-                            Button {
-                                do {
-                                    try getLibrary().select(id: id)
-                                    selectedID = id
-                                    message = "已切换测试音源。通过试听后将自动加入正式播放通道。"
-                                } catch { message = error.localizedDescription }
-                            } label: {
-                                HStack {
-                                    Image(systemName: selectedID == id ? "largecircle.fill.circle" : "circle")
-                                        .foregroundStyle(selectedID == id ? .green : .secondary)
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text((try? getLibrary().filename(id: id)) ?? id).lineLimit(1)
-                                        Text(((try? getLibrary().isBundled(id: id)) == true) ? "内置音源 · 已接入正式播放" : ((try? getLibrary().approvedIDs.contains(id)) == true ? "已通过试听 · 正式播放通道已启用" : "测试音源 · 试听成功后自动启用"))
-                                            .font(.caption2).foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 9) {
+                            HStack {
+                                Button {
+                                    if expandedID == id {
+                                        expandedID = nil
+                                    } else {
+                                        expandedID = id
+                                        do {
+                                            try getLibrary().select(id: id)
+                                            selectedID = id
+                                            message = "正在设置音源的四个平台。勾选即加入正式播放，取消勾选即跳过。"
+                                        } catch { message = error.localizedDescription }
                                     }
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: expandedID == id ? "chevron.down" : "chevron.right")
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(.secondary)
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text((try? getLibrary().filename(id: id)) ?? id)
+                                                .lineLimit(1)
+                                            Text("已启用 \\(platformSelections[id]?.count ?? 0) / 4 个平台")
+                                                .font(.caption2).foregroundStyle(.secondary)
+                                        }
+                                        Spacer(minLength: 4)
+                                    }
+                                    .contentShape(Rectangle())
                                 }
+                                .buttonStyle(.plain)
+                                Spacer(minLength: 4)
+                                Button("检查") { inspect(id: id) }
+                                    .buttonStyle(.bordered)
                             }
-                            .buttonStyle(.plain)
-                            Spacer()
-                            Button("检查") { inspect(id: id) }
-                                .buttonStyle(.bordered)
+                            if expandedID == id {
+                                ForEach(["tx", "wy", "kw", "kg"], id: \.self) { platform in
+                                    Toggle(isOn: Binding(
+                                        get: { platformSelections[id]?.contains(platform) == true },
+                                        set: { setPlatform(id: id, platform: platform, enabled: $0) }
+                                    )) {
+                                        HStack(spacing: 6) {
+                                            Text(platformDisplayName(platform))
+                                            if platform == "tx" && ((try? getLibrary().isJiexiang(id: id)) == true) {
+                                                Text("已知失效").font(.caption2).foregroundStyle(.secondary)
+                                            }
+                                        }
+                                    }
+                                    .disabled(platform == "tx" && ((try? getLibrary().isJiexiang(id: id)) == true))
+                                }
+                                Text("仅控制这条音源参与哪些平台的正式播放，不影响其他音源。")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
                         }
                     }
                     .onDelete(perform: delete)
                 }
                 Section {
-                    Text("可导入多个音源，点击左侧圆圈切换当前测试音源。")
+                    Text("点击音源名称展开四个平台，勾选启用、取消勾选停用；展开后也会将该音源设为当前测试对象。")
                         .font(.caption).foregroundStyle(.secondary)
                     Button("从文件导入 .js 音源") { isImporterPresented = true }
                     Button("从网址导入在线 JS 音源") {
@@ -163,10 +194,27 @@ struct LXSourceTestPanel: View {
         return newLibrary
     }
 
+    @MainActor
+    private func setPlatform(id: String, platform: String, enabled: Bool) {
+        do {
+            try getLibrary().setPlatformEnabled(id: id, platform: platform, enabled: enabled)
+            platformSelections[id] = getLibrarySafePlatforms(id: id)
+            message = "\(platformDisplayName(platform))已\(enabled ? "启用" : "停用")，下次正式取链时生效。"
+        } catch {
+            message = "无法修改平台：\(error.localizedDescription)"
+        }
+    }
+
+    private func getLibrarySafePlatforms(id: String) -> Set<String> {
+        (try? getLibrary().enabledPlatforms(id: id)) ?? []
+    }
+
     private func reload() {
         do {
             let store = try getLibrary()
             importedIDs = try store.listIdentifiers()
+            platformSelections = Dictionary(uniqueKeysWithValues: importedIDs.map { ($0, store.enabledPlatforms(id: $0)) })
+            if let expandedID, !importedIDs.contains(expandedID) { self.expandedID = nil }
             selectedID = store.selectedID.flatMap { importedIDs.contains($0) ? $0 : nil } ?? importedIDs.first
             if let selectedID, store.selectedID != selectedID { try store.select(id: selectedID) }
         }
