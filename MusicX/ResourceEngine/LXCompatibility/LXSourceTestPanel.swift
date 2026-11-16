@@ -299,7 +299,14 @@ struct LXSourceTestPanel: View {
             let url = try await host.resolve(source: testPlatform, musicInfo: info, quality: quality, timeout: 20)
             stopPreview()
             previewURL = url
-            message = "解析成功（请求音质：\(quality)），已取得 URL。点击试听验证播放：\(url.absoluteString)"
+            let hostName = url.host?.lowercased() ?? ""
+            if hostName == "yinyue.haitangw.net" {
+                message = "长青生成了 PHP 接口地址（音质：\(quality)），尚未确认音频可播放。请点击试听：\(url.absoluteString)"
+            } else if hostName == "music-dl.sayqz.com" {
+                message = "幻音生成了解析接口地址（音质：\(quality)），尚未确认域名及音频可用。请点击试听：\(url.absoluteString)"
+            } else {
+                message = "取得候选地址（音质：\(quality)），尚未验证实际播放。请点击试听：\(url.absoluteString)"
+            }
         } catch {
             message = "真实取链失败：\(error.localizedDescription)"
         }
