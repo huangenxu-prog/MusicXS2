@@ -261,6 +261,13 @@ struct MusicResourceEngine {
         self.session = session
     }
 
+    /// Resolve imported LX scripts for a matched track on its OWN platform.
+    /// Used by cross-platform fallback; never re-enters the resource scheduler.
+    func resolveImportedLX(song: MusicSong, quality: MusicQuality) async throws -> URL? {
+        try await ImportedLXSourceProvider(excludedScriptIDs: [])
+            .resolve(song: song, quality: quality)?.url
+    }
+
     func resolve(song: MusicSong, quality: MusicQuality) async throws -> URL {
         let resource = try await resolveResource(song: song, quality: quality)
         return resource.url
