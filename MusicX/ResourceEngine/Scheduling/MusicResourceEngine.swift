@@ -157,9 +157,20 @@ private struct ImportedLXSourceProvider: MusicResourceProvider {
 
         let scripts = try await MainActor.run { () throws -> [(String, String)] in
             let library = try LXSourceLibrary()
-            return try library.listIdentifiers().map { id in
-                (id, try library.load(id: id))
+            var scripts: [(String, String)] = []
+            if let url = Bundle.main.url(forResource: "BundledLXSources", withExtension: "json"),
+               let data = try? Data(contentsOf: url),
+               let bundled = try? JSONDecoder().decode([BundledLXScript].self, from: data) {
+                scripts = bundled.map { ($0.id, $0.contents) }
             }
+            // A corrupt imported file must not disable the built-in suppliers.
+            for id in (try? library.listIdentifiers()) ?? [] {
+                if let script = try? library.load(id: id),
+                   !scripts.contains(where: { $0.1 == script }) {
+                    scripts.append((id, script))
+                }
+            }
+            return scripts
         }
         guard !scripts.isEmpty else {
             MusicSourceDiagnostics.shared.record(
@@ -254,6 +265,11 @@ private struct ImportedLXSourceProvider: MusicResourceProvider {
             return nil
         }
     }
+}
+
+private struct BundledLXScript: Decodable {
+    let id: String
+    let contents: String
 }
 
 /// The middle layer between the player-facing resolver and external supplier libraries.

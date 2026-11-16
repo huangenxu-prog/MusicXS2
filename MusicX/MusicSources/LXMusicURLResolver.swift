@@ -376,7 +376,10 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
                 }
             },
             { await captureSearch { try await searchKuwoNative(keyword: searchKeyword) } },
-            { await captureSearch { try await searchQQNative(keyword: searchKeyword) } }
+            { await captureSearch { try await searchQQNative(keyword: searchKeyword) } },
+            { await captureSearch {
+                try await GDStudioMusicSearchService().searchKugouNative(keyword: searchKeyword)
+            } }
         ]
         var anySongs = false
         let result = await withTaskGroup(
@@ -398,6 +401,12 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
                     if let failure { searchFailures.append(failure) }
                     if !songs.isEmpty { anySongs = true }
                     let matched = makeCandidates(from: [songs])
+                    MusicSourceDiagnostics.shared.record(
+                        event: "fallback-match", source: song.source.rawValue,
+                        provider: songs.first?.source.rawValue ?? "catalog", duration: 0,
+                        result: matched.isEmpty ? "no_match" : "matched",
+                        detail: "title=\(song.title); artist=\(song.artist); results=\(songs.count); matches=\(matched.count); error=\(failure ?? "none")"
+                    )
                     // Each matched ID gets an independent task, including its
                     // imported scripts. No edition or catalog gates another.
                     for candidate in matched.prefix(2) {

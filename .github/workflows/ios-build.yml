@@ -68,6 +68,16 @@ jobs:
 
       - name: Verify archived background audio configuration
         run: |
+          python3 - <<'PYCODE'
+          import json
+          from pathlib import Path
+          bundle = Path('build/MusicX.xcarchive/Products/Applications/MusicX.app/BundledLXSources.json')
+          scripts = json.loads(bundle.read_text())
+          assert len(scripts) == 4, 'Built-in LX sources missing from IPA'
+          assert len({s['id'] for s in scripts}) == 4
+          assert all(s['contents'].strip() for s in scripts)
+          print('Verified four bundled LX scripts in archived app')
+          PYCODE
           /usr/libexec/PlistBuddy -c 'Print :UIBackgroundModes' build/MusicX.xcarchive/Products/Applications/MusicX.app/Info.plist
           /usr/libexec/PlistBuddy -c 'Print :UIBackgroundModes:0' build/MusicX.xcarchive/Products/Applications/MusicX.app/Info.plist | grep -qx audio
           /usr/libexec/PlistBuddy -c 'Print :NSAppTransportSecurity:NSExceptionDomains:yinyue.haitangw.net:NSExceptionAllowsInsecureHTTPLoads' build/MusicX.xcarchive/Products/Applications/MusicX.app/Info.plist | grep -qx true
