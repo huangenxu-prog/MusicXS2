@@ -264,7 +264,12 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
         // Migu's native search can take up to 12 seconds and its GDStudio
         // fallback can add another 12 seconds, so it must not block results
         // already returned by NetEase, QQ, or Kugou.
-        async let netease = captureSearch { try await service.search(keyword: song.title, source: .netease, count: 12) }
+        async let netease = captureSearch {
+            try await MusicXLegacySupplierLibrary(session: session).search(
+                keyword: song.title, source: .netease, page: 1, count: 20,
+                albumOnly: false, useNativeNetEase: true
+            )
+        }
         async let kuwo = captureSearch { try await service.search(keyword: song.title, source: .kuwo, count: 12) }
         async let kugou = captureSearch { try await service.search(keyword: song.title, source: .kugou, count: 12) }
         async let qq = captureSearch { try await service.search(keyword: song.title, source: .qq, count: 12) }
