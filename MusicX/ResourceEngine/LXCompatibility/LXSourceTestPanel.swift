@@ -106,7 +106,7 @@ struct LXSourceTestPanel: View {
                                     }
                                     .disabled(platform == "tx" && ((try? getLibrary().isJiexiang(id: id)) == true))
                                 }
-                                Text("仅控制这条音源参与哪些平台的正式播放，不影响其他音源。")
+                                Text("仅控制这条音源的正式播放通道；新导入音源需先试听通过，勾选才会生效。")
                                     .font(.caption2).foregroundStyle(.secondary)
                             }
                         }
@@ -264,7 +264,8 @@ struct LXSourceTestPanel: View {
         do {
             try getLibrary().setPlatformEnabled(id: id, platform: platform, enabled: enabled)
             platformSelections[id] = getLibrarySafePlatforms(id: id)
-            message = "\(platformDisplayName(platform))已\(enabled ? "启用" : "停用")，下次正式取链时生效。"
+            let approved = (try? getLibrary().isBundled(id: id)) == true || ((try? getLibrary().approvedIDs.contains(id)) == true)
+            message = approved ? "\(platformDisplayName(platform))已\(enabled ? "启用" : "停用")，下次正式取链时生效。" : "已保存勾选设置；需要先试听成功，才会参与正式播放。"
         } catch {
             message = "无法修改平台：\(error.localizedDescription)"
         }
@@ -565,8 +566,12 @@ struct LXSourceTestPanel: View {
                 if player.timeControlStatus == .playing {
                     if let id = selectedID {
                         do {
-                            try getLibrary().approve(id: id)
-                            message = "播放器报告正在播放；该音源已加入正式播放通道。请确认是否听到声音。"
+                            try getLibrary().approve(
+                                id: id,
+                                testedPlatform: selectedSong.map { platformID(for: $0.source) }
+                            )
+                            reload()
+                            message = "播放器报告正在播放；试听平台已加入正式播放通道。请确认是否听到声音。"
                         } catch {
                             message = "播放器正在播放，但启用音源失败：\(error.localizedDescription)"
                         }
