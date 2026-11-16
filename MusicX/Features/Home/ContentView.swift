@@ -219,6 +219,9 @@ struct ContentView: View {
     @State private var isDiscoveryPopping = false
     @State private var isSettingsAlertPresented = false
     @State private var isLXSourceTestPresented = false
+    @State private var isSourceAccessPromptPresented = false
+    @State private var sourceAccessPhrase = ""
+    @State private var isSourceAccessDeniedPresented = false
 
     private var filteredSongs: [AppSong] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -918,7 +921,8 @@ struct ContentView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("搜索音乐")
                     Button {
-                        isLXSourceTestPresented = true
+                        sourceAccessPhrase = ""
+                        isSourceAccessPromptPresented = true
                     } label: {
                         Image(systemName: "puzzlepiece.extension")
                             .font(.system(size: 19, weight: .medium))
@@ -929,6 +933,25 @@ struct ContentView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("音源测试")
+                    .alert("请输入口令", isPresented: $isSourceAccessPromptPresented) {
+                        SecureField("口令", text: $sourceAccessPhrase)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        Button("取消", role: .cancel) {
+                            sourceAccessPhrase = ""
+                        }
+                        Button("确定") {
+                            if sourceAccessPhrase == "浅笑" {
+                                isLXSourceTestPresented = true
+                            } else {
+                                isSourceAccessDeniedPresented = true
+                            }
+                            sourceAccessPhrase = ""
+                        }
+                    }
+                    .alert("别闹🙄", isPresented: $isSourceAccessDeniedPresented) {
+                        Button("确定", role: .cancel) {}
+                    }
                     .sheet(isPresented: $isLXSourceTestPresented) {
                         LXSourceTestPanel()
                             .preferredColorScheme(.dark)
