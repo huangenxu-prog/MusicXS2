@@ -59,30 +59,9 @@ struct DomesticPlaylistDiscoveryService {
             URLQueryItem(name: "filter", value: "0")
         ]
         guard let url = components?.url else { throw MusicSourceError.invalidResponse("酷狗歌单搜索地址无效") }
-        // This legacy CDN frequently has a certificate hostname mismatch on
-        // iOS. Never bypass TLS validation or silently downgrade to HTTP.
-        // Use the mobile site's HTTPS playlist endpoint as a fallback.
-        let root: [String: Any]
-        do {
-            root = try await getJSON(url, referer: "https://www.kugou.com/")
-        } catch {
-            try Task.checkCancellation()
-            guard let fallbackURL = URL(string: "https://m.kugou.com/plist/list/\(id)?json=true") else {
-                throw MusicSourceError.invalidResponse("酷狗备用歌单地址无效")
-            }
-            do {
-                root = try await getJSON(fallbackURL, referer: "https://m.kugou.com/")
-            } catch {
-                throw MusicSourceError.invalidResponse("酷狗歌单接口暂不可用，HTTPS 备用接口也未能读取：\(error.localizedDescription)")
-            }
-        }
-        let data = root["data"] as? [String: Any] ?? [:]
-        let list = data["list"] as? [String: Any] ?? [:]
-        let rows = (data["info"] as? [[String: Any]])
-            ?? (data["songs"] as? [[String: Any]])
-            ?? (list["info"] as? [[String: Any]])
-            ?? (list["songs"] as? [[String: Any]])
-            ?? []
+        let root = try await getJSON(url, referer: "https://www.kugou.com/")
+        let data = root["data"] as? [String: Any]
+        let rows = data?["info"] as? [[String: Any]] ?? []
         return rows.compactMap { row in
             guard let rawID = row["specialid"], let name = row["specialname"] as? String, !name.isEmpty else { return nil }
             let cover = (row["imgurl"] as? String)?.replacingOccurrences(of: "{size}", with: "480")
@@ -187,9 +166,25 @@ struct DomesticPlaylistDiscoveryService {
             URLQueryItem(name: "area_code", value: "1")
         ]
         guard let url = components?.url else { throw MusicSourceError.invalidResponse("酷狗歌单详情地址无效") }
-        let root = try await getJSON(url, referer: "https://www.kugou.com/")
-        let data = root["data"] as? [String: Any]
-        let rows = data?["info"] as? [[String: Any]] ?? []
+        // Keep strict TLS validation. The legacy CDN can fail certificate
+        // validation on iOS; try an HTTPS mobile-site endpoint instead.
+        let root: [String: Any]
+        do {
+            root = try await getJSON(url, referer: "https://www.kugou.com/")
+        } catch {
+            try Task.checkCancellation()
+            guard let fallbackURL = URL(string: "https://m.kugou.com/plist/list/\(id)?json=true") else {
+                throw MusicSourceError.invalidResponse("酷狗备用歌单地址无效")
+            }
+            root = try await getJSON(fallbackURL, referer: "https://m.kugou.com/")
+        }
+        let data = root["data"] as? [String: Any] ?? [:]
+        let list = data["list"] as? [String: Any] ?? [:]
+        let rows = (data["info"] as? [[String: Any]])
+            ?? (data["songs"] as? [[String: Any]])
+            ?? (list["info"] as? [[String: Any]])
+            ?? (list["songs"] as? [[String: Any]])
+            ?? []
         let songs: [MusicSong] = rows.compactMap { row in
             let hash = (row["hash"] as? String)
                 ?? (row["SQFileHash"] as? String)
