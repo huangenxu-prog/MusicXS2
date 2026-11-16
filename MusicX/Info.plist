@@ -10,9 +10,11 @@
     <string>207</string>
     <key>UILaunchStoryboardName</key>
     <string>LaunchScreen</string>
-    <!-- Limit cleartext transport to the legacy Changqing audio endpoint. -->
+    <!-- Experimental LX-source test build only: some community scripts use HTTP IP endpoints. Remove before production release. -->
     <key>NSAppTransportSecurity</key>
     <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
         <key>NSExceptionDomains</key>
         <dict>
             <key>yinyue.haitangw.net</key>
