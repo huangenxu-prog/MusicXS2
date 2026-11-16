@@ -170,11 +170,11 @@ final class LXSourceScriptHost {
         guard let callback = pendingHTTPCallbacks.removeValue(forKey: id) else { return }
         if let error {
             initializationEvents.append("HTTP error #\(id): \(error)")
-            callback.call(withArguments: [error, NSNull()])
+            callback.call(withArguments: [error, NSNull(), NSNull()])
         } else {
             let status = response?["statusCode"] as? Int ?? 0
             initializationEvents.append("HTTP complete #\(id): \(status)")
-            callback.call(withArguments: [NSNull(), response ?? [:]])
+            callback.call(withArguments: [NSNull(), response ?? [:], response?["body"] ?? NSNull()])
         }
     }
 
