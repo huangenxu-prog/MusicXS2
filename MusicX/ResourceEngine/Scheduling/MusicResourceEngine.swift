@@ -136,6 +136,73 @@ private struct CrossPlatformFallbackProvider: MusicResourceProvider {
     }
 }
 
+/// Resolve a track through every imported LX script that advertises its platform.
+/// The script library remains user-managed; importing or removing scripts requires no rebuild.
+private struct ImportedLXSourceProvider: MusicResourceProvider {
+    let identifier = "imported-lx-scripts"
+    let displayName = "已导入洛雪音源"
+
+    func resolve(song: MusicSong, quality: MusicQuality) async throws -> ResolvedMusicResource? {
+        let platform: String
+        switch song.source {
+        case .qq: platform = "tx"
+        case .netease: platform = "wy"
+        case .kuwo: platform = "kw"
+        case .kugou: platform = "kg"
+        default: return nil
+        }
+
+        let scripts = try await MainActor.run { () throws -> [(String, String)] in
+            let library = try LXSourceLibrary()
+            return try library.listIdentifiers().map { id in
+                (id, try library.load(id: id))
+            }
+        }
+        guard !scripts.isEmpty else { return nil }
+
+        let info: [String: Any] = [
+            "songmid": song.sourceID,
+            "id": song.sourceID,
+            "name": song.title,
+            "singer": song.artist,
+            "albumName": song.album ?? "",
+            "interval": Int(song.duration ?? 0),
+            "hash": song.hash ?? song.sourceID,
+            "albumId": song.albumID ?? ""
+        ]
+        // Each host owns a JSContext and must remain on the main actor.
+        // Keep failures independent: one broken imported script cannot block the others.
+        var failures: [String] = []
+        for (id, script) in scripts {
+            try Task.checkCancellation()
+            do {
+                let host = try await MainActor.run { try LXSourceScriptHost(script: script) }
+                let ready = await host.awaitRegistration(timeout: 8)
+                guard ready else { continue }
+                let metadata = await MainActor.run { host.registeredSources[platform] as? [String: Any] }
+                guard let metadata else { continue }
+                let qualities = metadata["qualitys"] as? [String] ?? []
+                let requested = qualities.contains("320k") ? "320k"
+                    : (qualities.contains("128k") ? "128k" : (qualities.first ?? "320k"))
+                let url = try await host.resolve(
+                    source: platform, musicInfo: info, quality: requested, timeout: 15
+                )
+                return ResolvedMusicResource(
+                    url: url, providerID: "lx:\(id):\(platform)",
+                    providerName: "洛雪导入音源"
+                )
+            } catch {
+                if Task.isCancelled || error is CancellationError { throw CancellationError() }
+                failures.append(error.localizedDescription)
+            }
+        }
+        if !failures.isEmpty {
+            throw MusicSourceError.invalidResponse("导入音源解析失败：" + failures.prefix(3).joined(separator: "；"))
+        }
+        return nil
+    }
+}
+
 /// The middle layer between the player-facing resolver and external supplier libraries.
 /// It intentionally does not own playback URL caching; MusicCache remains in the
 /// existing LXMusicURLResolver compatibility boundary.
@@ -166,17 +233,20 @@ struct MusicResourceEngine {
             providers = [
                 (QQGDStudioAudioProvider(session: session), 0, 1_000),
                 (QQChkszAudioProvider(session: session), 1, 900),
-                (CrossPlatformFallbackProvider(session: session), 2, 50)
+                (ImportedLXSourceProvider(), 2, 200),
+                (CrossPlatformFallbackProvider(session: session), 3, 50)
             ]
         case .netease:
             providers = [
                 (NetEaseNativeAudioProvider(session: session), 0, 1_000),
                 (KumonePyncmdAudioSourceProvider(), 1, 100),
+                (ImportedLXSourceProvider(), 2, 200),
                 (CrossPlatformFallbackProvider(session: session), 2, 50)
             ]
         default:
             providers = [
-                (MusicXLegacySupplierLibrary(session: session), 0, 100)
+                (MusicXLegacySupplierLibrary(session: session), 0, 100),
+                (ImportedLXSourceProvider(), 1, 200)
             ]
         }
 
