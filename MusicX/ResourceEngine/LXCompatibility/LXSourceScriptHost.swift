@@ -1,6 +1,7 @@
 import Foundation
 import JavaScriptCore
 import CryptoKit
+import CommonCrypto
 
 /// Experimental LX custom-source host. Not connected to the production resolver.
 /// Each instance owns one JSContext; call all methods on the main thread.
@@ -83,6 +84,12 @@ final class LXSourceScriptHost {
         context.setObject(script, forKeyedSubscript: "__lxRawScript" as NSString)
         context.setObject(scriptVersion, forKeyedSubscript: "__lxScriptVersion" as NSString)
         context.setObject(md5, forKeyedSubscript: "__lxMD5" as NSString)
+        // LX crypto.aesEncrypt(data, mode, key, iv) returns a byte buffer.
+        // Return hex from the native bridge, then expose bytes to JS scripts.
+        let encryptAES: @convention(block) (String, String, String, String) -> String = { data, mode, key, iv in
+            Self.aesEncryptHex(data: data, mode: mode, key: key, iv: iv) ?? ""
+        }
+        context.setObject(encryptAES, forKeyedSubscript: "__lxAES" as NSString)
         let scheduleTimer: @convention(block) (JSValue, Double) -> Int = { [weak self] callback, delay in
             guard let self else { return -1 }
             self.nextTimerID += 1
@@ -284,6 +291,43 @@ final class LXSourceScriptHost {
         }
     }
 
+    private static func aesEncryptHex(data: String, mode: String, key: String, iv: String) -> String? {
+        let normalizedMode = mode.lowercased()
+        let ecb = normalizedMode == "ecb" || normalizedMode.hasSuffix("-ecb")
+        let cbc = normalizedMode == "cbc" || normalizedMode.hasSuffix("-cbc")
+        guard ecb || cbc else { return nil }
+
+        let keyData = Data(key.utf8)
+        guard [kCCKeySizeAES128, kCCKeySizeAES192, kCCKeySizeAES256].contains(keyData.count) else {
+            return nil
+        }
+        let ivData = Data(iv.utf8)
+        if cbc && ivData.count != kCCBlockSizeAES128 { return nil }
+
+        let payload = Data(data.utf8)
+        var output = Data(count: payload.count + kCCBlockSizeAES128)
+        var outputLength: size_t = 0
+        let options = CCOptions(kCCOptionPKCS7Padding | (ecb ? kCCOptionECBMode : 0))
+        let status: CCCryptorStatus = output.withUnsafeMutableBytes { outputBytes in
+            payload.withUnsafeBytes { inputBytes in
+                keyData.withUnsafeBytes { keyBytes in
+                    ivData.withUnsafeBytes { ivBytes in
+                        CCCrypt(
+                            CCOperation(kCCEncrypt), CCAlgorithm(kCCAlgorithmAES),
+                            options, keyBytes.baseAddress, keyData.count,
+                            ecb ? nil : ivBytes.baseAddress,
+                            inputBytes.baseAddress, payload.count,
+                            outputBytes.baseAddress, output.count,
+                            &outputLength
+                        )
+                    }
+                }
+            }
+        }
+        guard status == kCCSuccess else { return nil }
+        return output.prefix(outputLength).map { String(format: "%02x", $0) }.joined()
+    }
+
     private static func jsonString(_ object: Any) -> String {
         guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.fragmentsAllowed, .sortedKeys]),
               let result = String(data: data, encoding: .utf8) else { return "null" }
@@ -331,7 +375,14 @@ final class LXSourceScriptHost {
         },
         utils: {
           crypto: {
-            md5: function (value) { return __lxMD5(String(value)); }
+            md5: function (value) { return __lxMD5(String(value)); },
+            aesEncrypt: function (data, mode, key, iv) {
+              const hex = __lxAES(String(data), String(mode), String(key), String(iv || ''));
+              if (!hex) throw new Error('Unsupported AES mode or key/IV length');
+              const bytes = [];
+              for (let i = 0; i < hex.length; i += 2) bytes.push(parseInt(hex.slice(i, i + 2), 16));
+              return bytes;
+            }
           },
           buffer: {
             from: function (value, encoding) {
