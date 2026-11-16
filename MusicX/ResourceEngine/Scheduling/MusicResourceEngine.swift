@@ -268,6 +268,29 @@ struct MusicResourceEngine {
             .resolve(song: song, quality: quality)?.url
     }
 
+    /// Native NetEase and pyncmd are independent cross-platform candidates.
+    /// Never call the full scheduler here: it would recurse into fallback.
+    func resolveMatchedNetEase(song: MusicSong, quality: MusicQuality) async -> URL? {
+        guard song.source == .netease else { return nil }
+        return await withTaskGroup(of: URL?.self, returning: URL?.self) { group in
+            group.addTask {
+                try? await NetEaseNativeAudioProvider(session: session)
+                    .resolve(song: song, quality: quality)?.url
+            }
+            group.addTask {
+                try? await KumonePyncmdAudioSourceProvider()
+                    .resolve(song: song, quality: quality)?.url
+            }
+            while let url = await group.next() {
+                if let url {
+                    group.cancelAll()
+                    return url
+                }
+            }
+            return nil
+        }
+    }
+
     func resolve(song: MusicSong, quality: MusicQuality) async throws -> URL {
         let resource = try await resolveResource(song: song, quality: quality)
         return resource.url
