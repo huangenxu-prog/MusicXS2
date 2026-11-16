@@ -290,38 +290,40 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
         }
 
         func resolveCandidates(_ candidates: [(MusicSong, Int)]) async throws -> URL? {
-            for (candidate, score) in candidates {
-                try Task.checkCancellation()
-                do {
-                    if let url = try await resolveNative(song: candidate, quality: quality) {
-                        MusicSourceDiagnostics.shared.record(
-                            event: "resolve-fallback", source: song.source.rawValue,
-                            provider: candidate.source.rawValue, duration: 0,
-                            result: "url_returned",
-                            detail: "matched=\(candidate.title) · \(candidate.artist) · score=\(score)"
-                        )
+            // Limit simultaneous requests to the strongest matching song on each
+            // platform. Kuwo and Kugou therefore compete at the same time.
+            var selected = Set<MusicSource>()
+            let representatives = candidates.filter { selected.insert($0.0.source).inserted }
+            guard !representatives.isEmpty else { return nil }
+            return await withTaskGroup(of: (URL?, String?).self) { group in
+                for (candidate, score) in representatives {
+                    group.addTask {
+                        do {
+                            guard let url = try await resolveNative(song: candidate, quality: quality) else {
+                                return (nil, nil)
+                            }
+                            MusicSourceDiagnostics.shared.record(
+                                event: "resolve-fallback", source: song.source.rawValue,
+                                provider: candidate.source.rawValue, duration: 0,
+                                result: "url_returned",
+                                detail: "matched=\(candidate.title) · \(candidate.artist) · score=\(score)"
+                            )
+                            return (url, nil)
+                        } catch {
+                            if Task.isCancelled || error is CancellationError { return (nil, nil) }
+                            return (nil, "\(candidate.source.displayName): \(error.localizedDescription)")
+                        }
+                    }
+                }
+                while let (url, failure) = await group.next() {
+                    if let url {
+                        group.cancelAll()
                         return url
                     }
-                    MusicSourceDiagnostics.shared.record(
-                        event: "resolve-fallback", source: song.source.rawValue,
-                        provider: candidate.source.rawValue, duration: 0,
-                        result: "candidate_unavailable",
-                        detail: "matched=\(candidate.title) · score=\(score)"
-                    )
-                } catch {
-                    if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled {
-                        throw CancellationError()
-                    }
-                    candidateFailures.append("\(candidate.source.displayName): \(error.localizedDescription)")
-                    MusicSourceDiagnostics.shared.record(
-                        event: "resolve-fallback", source: song.source.rawValue,
-                        provider: candidate.source.rawValue, duration: 0,
-                        result: "candidate_error",
-                        detail: error.localizedDescription
-                    )
+                    if let failure { candidateFailures.append(failure) }
                 }
+                return nil
             }
-            return nil
         }
 
         // Try matching results from NetEase, Kuwo, Kugou, and QQ immediately.
