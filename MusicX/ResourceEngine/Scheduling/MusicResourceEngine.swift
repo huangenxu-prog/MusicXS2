@@ -275,7 +275,7 @@ struct MusicResourceEngine {
 
     /// Native NetEase and pyncmd are independent cross-platform candidates.
     /// Never call the full scheduler here: it would recurse into fallback.
-    func resolveMatchedNetEase(song: MusicSong, quality: MusicQuality) async -> URL? {
+    func resolveMatchedNetEase(song: MusicSong, quality: MusicQuality, excludedURLIDs: Set<String> = []) async -> URL? {
         guard song.source == .netease else { return nil }
         return await withTaskGroup(of: URL?.self, returning: URL?.self) { group in
             group.addTask {
@@ -287,7 +287,7 @@ struct MusicResourceEngine {
                     .resolve(song: song, quality: quality)?.url
             }
             while let url = await group.next() {
-                if let url {
+                if let url, !excludedURLIDs.contains(LXMusicURLResolver.fallbackURLID(url)) {
                     group.cancelAll()
                     return url
                 }
