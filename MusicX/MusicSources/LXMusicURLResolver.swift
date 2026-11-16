@@ -323,7 +323,7 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
                                 // services or other legacy native suppliers here.
                                 paths.addTask {
                                     try? await MusicResourceEngine(session: session)
-                                        .resolveImportedLX(song: candidate, quality: quality)
+                                        .resolveImportedLX(song: candidate, quality: quality, excludedURLIDs: excludedURLIDs)
                                 }
                                 if candidate.source == .netease {
                                     paths.addTask {
