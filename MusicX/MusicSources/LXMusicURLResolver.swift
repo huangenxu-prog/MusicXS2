@@ -255,17 +255,19 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
         return nil
     }
 
+    private enum FallbackEvent: Sendable {
+        case searched([MusicSong], String?)
+        case resolved(URL?)
+    }
+
     /// Search other platforms after native resolution fails. A normalized title
     /// and artist match is sufficient; duration and album metadata are ignored.
     private func resolveAlternativeSource(song: MusicSong, quality: MusicQuality, excludedURLIDs: Set<String> = []) async throws -> URL? {
         let searchKeyword = AudioSourceTrackMatcher.searchTitle(song.title)
 
-        // Search all four supported catalogs concurrently for cross-platform playback.
-        // Migu's native search can take up to 12 seconds and its GDStudio
-        // fallback can add another 12 seconds, so it must not block results
-        // already returned by NetEase, QQ, or Kugou.
+        // These catalogs supply matched IDs for playback fallback only.
+        // The app's displayed content remains NetEase and QQ.
         var searchFailures: [String] = []
-        var candidateFailures: [String] = []
         var seen = Set<String>()
 
         func makeCandidates(from groups: [[MusicSong]]) -> [(MusicSong, Int)] {
@@ -284,7 +286,7 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
                 }
         }
 
-        func resolveCandidates(_ candidates: [(MusicSong, Int)]) async throws -> URL? {
+        @Sendable func resolveCandidates(_ candidates: [(MusicSong, Int)]) async throws -> URL? {
             // Permit two matched IDs per platform: the highest-ranked catalog hit
             // may not resolve in any JS even when the second hit does.
             var counts: [MusicSource: Int] = [:]
@@ -350,55 +352,71 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
                         group.cancelAll()
                         return url
                     }
-                    if let failure { candidateFailures.append(failure) }
+                    if let failure {
+                        MusicSourceDiagnostics.shared.record(
+                            event: "resolve-fallback", source: song.source.rawValue,
+                            provider: "matched-candidate", duration: 0,
+                            result: "failed", detail: failure
+                        )
+                    }
                 }
                 return nil
             }
         }
 
-        // Stream search results as they arrive. A slow or unavailable catalog
-        // must not block another platform's already matched playable stream.
-        let searchOperations: [(MusicSource, @Sendable () async -> ([MusicSong], String?))] = [
-            (.netease, {
+        // Search completions and URL completions share one queue. Never await
+        // a catalog's resolution in this consumer: another catalog may already
+        // have a faster playable path, even if its search finished later.
+        let searchOperations: [@Sendable () async -> ([MusicSong], String?)] = [
+            {
                 await captureSearch {
                     try await NetEaseNativeAPIClient(session: session).search(
                         keyword: searchKeyword, count: 20, offset: 0
                     )
                 }
-            }),
-            (.kuwo, { await captureSearch { try await searchKuwoNative(keyword: searchKeyword) } }),
-            (.qq, { await captureSearch { try await searchQQNative(keyword: searchKeyword) } })
+            },
+            { await captureSearch { try await searchKuwoNative(keyword: searchKeyword) } },
+            { await captureSearch { try await searchQQNative(keyword: searchKeyword) } }
         ]
         var anySongs = false
-        let result = await withTaskGroup(of: ([MusicSong], String?).self, returning: URL?.self) { group in
-            for (_, operation) in searchOperations {
-                group.addTask { await operation() }
-            }
-            while let (songs, failure) = await group.next() {
-                if let failure { searchFailures.append(failure) }
-                if !songs.isEmpty { anySongs = true }
-                let matched = makeCandidates(from: [songs])
-                if let url = try? await resolveCandidates(matched.filter { $0.1 >= 80 }) {
-                    group.cancelAll()
-                    return url
+        let result = await withTaskGroup(
+            of: FallbackEvent.self, returning: URL?.self
+        ) { group in
+            for operation in searchOperations {
+                group.addTask {
+                    let (songs, failure) = await operation()
+                    return .searched(songs, failure)
                 }
-                // Alternate editions are a fallback, but must not stall other
-                // catalogs: they are considered only after the standard search
-                // candidates from this completed catalog have been attempted.
-                if let url = try? await resolveCandidates(matched.filter { $0.1 < 80 }) {
+            }
+            while let event = await group.next() {
+                if Task.isCancelled {
                     group.cancelAll()
-                    return url
+                    return nil
+                }
+                switch event {
+                case let .searched(songs, failure):
+                    if let failure { searchFailures.append(failure) }
+                    if !songs.isEmpty { anySongs = true }
+                    let matched = makeCandidates(from: [songs])
+                    // Each matched ID gets an independent task, including its
+                    // imported scripts. No edition or catalog gates another.
+                    for candidate in matched.prefix(2) {
+                        group.addTask {
+                            .resolved(try? await resolveCandidates([candidate]))
+                        }
+                    }
+                case let .resolved(url):
+                    if let url {
+                        group.cancelAll()
+                        return url
+                    }
                 }
             }
             return nil
         }
+        try Task.checkCancellation()
         if let result { return result }
 
-        if !candidateFailures.isEmpty {
-            throw MusicSourceError.invalidResponse(
-                "跨平台备用解析异常：" + candidateFailures.joined(separator: "；")
-            )
-        }
         if !anySongs && !searchFailures.isEmpty {
             throw MusicSourceError.invalidResponse(
                 "跨平台搜索接口异常：" + searchFailures.joined(separator: "；")
