@@ -305,7 +305,8 @@ final class LXSourceScriptHost {
         if cbc && ivData.count != kCCBlockSizeAES128 { return nil }
 
         let payload = Data(data.utf8)
-        var output = Data(count: payload.count + kCCBlockSizeAES128)
+        let outputCapacity = payload.count + kCCBlockSizeAES128
+        var output = Data(count: outputCapacity)
         var outputLength: size_t = 0
         let options = CCOptions(kCCOptionPKCS7Padding | (ecb ? kCCOptionECBMode : 0))
         let status: CCCryptorStatus = output.withUnsafeMutableBytes { outputBytes in
@@ -317,7 +318,7 @@ final class LXSourceScriptHost {
                             options, keyBytes.baseAddress, keyData.count,
                             ecb ? nil : ivBytes.baseAddress,
                             inputBytes.baseAddress, payload.count,
-                            outputBytes.baseAddress, output.count,
+                            outputBytes.baseAddress, outputCapacity,
                             &outputLength
                         )
                     }
