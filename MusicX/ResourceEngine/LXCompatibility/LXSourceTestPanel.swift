@@ -13,11 +13,11 @@ struct LXSourceTestPanel: View {
     @State private var message: String?
     @State private var selectedID: String?
     @State private var library: LXSourceLibrary?
-    @State private var searchResults: [MusicSong] = []
+    @State private var searchResults: [String: [MusicSong]] = [:]
+    @State private var searchErrors: [String: String] = [:]
     @State private var selectedSong: MusicSong?
     @State private var isSearching = false
     @State private var testSongName = ""
-    @State private var testPlatform = "tx"
     @State private var testArtist = ""
     @State private var isResolving = false
     @State private var activeHost: LXSourceScriptHost?
@@ -71,36 +71,45 @@ struct LXSourceTestPanel: View {
                     }
                 }
                 Section("多平台歌曲搜索与试听") {
-                    Picker("平台", selection: $testPlatform) {
-                        Text("QQ").tag("tx")
-                        Text("网易").tag("wy")
-                        Text("酷我").tag("kw")
-                        Text("酷狗").tag("kg")
-                    }
-                    .onChange(of: testPlatform) { _, _ in
-                        searchResults = []
-                        selectedSong = nil
-                        previewPlayer?.pause()
-                        previewPlayer = nil
-                        previewURL = nil
-                    }
                     TextField("歌曲名称", text: $testSongName)
                     TextField("歌手名称（可选）", text: $testArtist)
-                    Button(isSearching ? "搜索中…" : "搜索歌曲") {
+                    Button(isSearching ? "四个平台搜索中…" : "搜索四个平台") {
                         Task { await searchPlatform() }
                     }
                     .disabled(isSearching || testSongName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    ForEach(searchResults) { song in
-                        Button {
-                            selectedSong = song
-                            Task { await resolveSelectedSong() }
-                        } label: {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(song.title)
-                                Text(song.artist).font(.caption).foregroundStyle(.secondary)
+                    ForEach(["tx", "wy", "kw", "kg"], id: \.self) { platform in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text(platformDisplayName(platform))
+                                    .font(.headline)
+                                Spacer()
+                                if isSearching && searchResults[platform] == nil && searchErrors[platform] == nil {
+                                    ProgressView().controlSize(.small)
+                                }
+                            }
+                            if let error = searchErrors[platform] {
+                                Text("搜索失败：\\(error)")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            } else if let songs = searchResults[platform] {
+                                if songs.isEmpty {
+                                    Text("没有找到歌曲")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                ForEach(songs) { song in
+                                    Button {
+                                        selectedSong = song
+                                        Task { await resolveSelectedSong() }
+                                    } label: {
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(song.title)
+                                            Text(song.artist).font(.caption).foregroundStyle(.secondary)
+                                        }
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                    .disabled(isResolving || selectedID == nil || isProbingURL)
+                                }
                             }
                         }
-                        .disabled(isResolving || selectedID == nil)
                     }
                     if isResolving { ProgressView("正在解析选中的歌曲…") }
                     if previewURL != nil {
@@ -109,7 +118,7 @@ struct LXSourceTestPanel: View {
                         Text(isProbingURL ? "正在自动验证地址是否返回真实音频…" : "HTTP 检查自动执行；是否实际出声以最终试听为准。")
                             .font(.caption).foregroundStyle(.secondary)
                     }
-                    Text("选择平台后搜索并取链。搜索仍使用现有服务，尚未移植洛雪原生搜索模块。")
+                    Text("一次搜索 QQ、网易云、酷我、酷狗，每个平台最多显示 5 首；点击歌曲测试当前音源对应平台。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 if let message {
@@ -230,45 +239,79 @@ struct LXSourceTestPanel: View {
         }
     }
 
-    @MainActor
-    private func searchPlatform() async {
-        isSearching = true
-        defer { isSearching = false }
-        selectedSong = nil
-        searchResults = []
-        stopPreview()
-        previewURL = nil
-        do {
-            let query = [testSongName, testArtist].filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.joined(separator: " ")
-            let service = GDStudioMusicSearchService()
-            let platform: MusicSource
-            switch testPlatform {
-            case "wy": platform = .netease
-            case "kw": platform = .kuwo
-            case "kg": platform = .kugou
-            default: platform = .qq
-            }
-            let songs: [MusicSong]
-            if testPlatform == "tx" {
-                // Do not mask signed-search errors with the unsupported GDStudio QQ source.
-                songs = try await service.searchQQSongsNative(keyword: query, count: 20)
-            } else if testPlatform == "kg" {
-                songs = try await service.searchKugouNative(keyword: query, count: 20)
-            } else if testPlatform == "kw" {
-                songs = try await service.searchKuwoNative(keyword: query, count: 20)
-            } else {
-                songs = try await service.search(keyword: query, source: platform, count: 20)
-            }
-            searchResults = songs
-            message = songs.isEmpty ? "当前平台未找到歌曲，请尝试只输入歌名。" : "找到 \(songs.count) 首歌曲，点击对应歌曲开始解析。"
-        } catch {
-            message = "歌曲搜索失败：\(error.localizedDescription)"
+    private func platformDisplayName(_ platform: String) -> String {
+        switch platform {
+        case "tx": return "QQ 音乐"
+        case "wy": return "网易云音乐"
+        case "kw": return "酷我音乐"
+        case "kg": return "酷狗音乐"
+        default: return platform
+        }
+    }
+
+    private func platformID(for source: MusicSource) -> String {
+        switch source {
+        case .qq: return "tx"
+        case .netease: return "wy"
+        case .kuwo: return "kw"
+        case .kugou: return "kg"
+        default: return ""
         }
     }
 
     @MainActor
+    private func searchPlatform() async {
+        guard !isSearching else { return }
+        isSearching = true
+        defer { isSearching = false }
+        selectedSong = nil
+        searchResults = [:]
+        searchErrors = [:]
+        stopPreview()
+        previewURL = nil
+        let query = [testSongName, testArtist]
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .joined(separator: " ")
+        message = "四个平台并发搜索中，每个平台最多返回 5 首歌曲…"
+        await withTaskGroup(of: (String, [MusicSong], String?).self) { group in
+            for platform in ["tx", "wy", "kw", "kg"] {
+                group.addTask {
+                    let service = GDStudioMusicSearchService()
+                    do {
+                        let songs: [MusicSong]
+                        switch platform {
+                        case "tx":
+                            songs = try await service.searchQQSongsNative(keyword: query, count: 5)
+                        case "kw":
+                            songs = try await service.searchKuwoNative(keyword: query, count: 5)
+                        case "kg":
+                            songs = try await service.searchKugouNative(keyword: query, count: 5)
+                        default:
+                            songs = try await service.search(keyword: query, source: .netease, count: 5)
+                        }
+                        return (platform, Array(songs.prefix(5)), nil)
+                    } catch {
+                        return (platform, [], error.localizedDescription)
+                    }
+                }
+            }
+            for await (platform, songs, error) in group {
+                if let error {
+                    searchErrors[platform] = error
+                } else {
+                    searchResults[platform] = songs
+                }
+            }
+        }
+        let total = searchResults.values.reduce(0) { $0 + $1.count }
+        message = "四个平台搜索完成：共 \\(total) 首候选歌曲；每个平台最多 5 首。点选任意歌曲即可测试对应平台。"
+    }
+
+    @MainActor
     private func resolveSelectedSong() async {
-        guard let id = selectedID, let song = selectedSong else { return }
+        guard !isResolving, let id = selectedID, let song = selectedSong else { return }
+        let selectedPlatform = platformID(for: song.source)
+        guard !selectedPlatform.isEmpty else { return }
         isResolving = true
         previewPlayer?.pause()
         previewPlayer = nil
@@ -281,11 +324,11 @@ struct LXSourceTestPanel: View {
             // Some community sources register only after an asynchronous update
             // check. Never resolve until the source has announced "inited".
             let registered = await host.awaitRegistration(timeout: 8)
-            guard registered, host.registeredSources[testPlatform] != nil else {
+            guard registered, host.registeredSources[selectedPlatform] != nil else {
                 let events = host.initializationEvents.suffix(8).joined(separator: "；")
                 let platforms = host.registeredSources.keys.sorted().joined(separator: ", ")
                 throw LXSourceScriptHost.HostError.initialization(
-                    "音源未注册当前平台 \(testPlatform)；已注册：\(platforms.isEmpty ? "无" : platforms)；JS 错误：\(host.lastError ?? "无")；事件：\(events.isEmpty ? "无" : events)"
+                    "音源未注册当前平台 \(selectedPlatform)；已注册：\(platforms.isEmpty ? "无" : platforms)；JS 错误：\(host.lastError ?? "无")；事件：\(events.isEmpty ? "无" : events)"
                 )
             }
             let info: [String: Any] = [
@@ -300,11 +343,11 @@ struct LXSourceTestPanel: View {
             ]
             // LX sources advertise their supported qualities per platform.
             // Do not force 320k when a script only registers 128k (e.g. fallback sources).
-            let sourceMetadata = host.registeredSources[testPlatform] as? [String: Any]
+            let sourceMetadata = host.registeredSources[selectedPlatform] as? [String: Any]
             let supportedQualities = sourceMetadata?["qualitys"] as? [String] ?? []
             let quality = supportedQualities.isEmpty || supportedQualities.contains("320k")
                 ? "320k" : (supportedQualities.contains("128k") ? "128k" : supportedQualities[0])
-            let url = try await host.resolve(source: testPlatform, musicInfo: info, quality: quality, timeout: 20)
+            let url = try await host.resolve(source: selectedPlatform, musicInfo: info, quality: quality, timeout: 20)
             stopPreview()
             previewURL = url
             message = "取得候选播放地址，正在自动检查 HTTP 响应和音频特征…"
