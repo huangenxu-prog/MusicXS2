@@ -114,14 +114,49 @@ struct PlatformCollectionCatalog {
         return collections
     }
 
-    /// First QQ collection feeds Daily Recommendations; first NetEase collection
-    /// can feed Featured Songs. Keep platform ordering instead of hard-coded IDs.
+    /// Daily Recommendations use QQ; Featured Songs use NetEase.
+    /// Preserve the platform's recommendation order. Fill from up to five
+    /// consecutive collections only when an earlier one has fewer than count
+    /// distinct title/artist pairs. Do not mix providers or fetch all catalogs.
     func firstCollectionSongs(provider: PlatformCollection.Provider, count: Int = 50) async throws -> [MusicSong] {
+        guard count > 0 else { return [] }
         let collections = try await (provider == .qq ? qqRecommendations() : neteaseRecommendations())
-        guard let first = collections.first else {
+        guard !collections.isEmpty else {
             throw MusicSourceError.invalidResponse("平台没有返回推荐合集")
         }
-        return try await tracks(for: first, count: count)
+
+        var songs: [MusicSong] = []
+        var seen = Set<String>()
+        for collection in collections.prefix(5) {
+            try Task.checkCancellation()
+            let remaining = count - songs.count
+            if remaining <= 0 { break }
+
+            // A single unavailable playlist must not prevent the next one
+            // from supplying the missing recommendations.
+            let candidates: [MusicSong]
+            do {
+                candidates = try await tracks(for: collection, count: remaining)
+            } catch {
+                try Task.checkCancellation()
+                continue
+            }
+
+            for song in candidates {
+                let key = (song.title + "|" + song.artist)
+                    .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+                    .filter { $0.isLetter || $0.isNumber || $0 == "|" }
+                guard seen.insert(key).inserted else { continue }
+                songs.append(song)
+                if songs.count == count { break }
+            }
+            if songs.count == count { break }
+        }
+
+        guard !songs.isEmpty else {
+            throw MusicSourceError.invalidResponse("推荐合集均未返回可用歌曲")
+        }
+        return songs
     }
 
     func tracks(for collection: PlatformCollection, count: Int = 50) async throws -> [MusicSong] {
