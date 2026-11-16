@@ -63,8 +63,8 @@ enum AudioSourceTrackMatcher {
     static func searchTitle(_ title: String) -> String {
         var result = title
         let suffixes = [
-            #"(?i)\\s*[（(\\[【]\\s*(?:live|concert|remix|instrumental|acoustic|remaster(?:ed)?|official|original|无损|现场版?|演唱会版?|伴奏版?|混音版?|标准版|官方版|原版)\\s*[)）\\]】]\\s*$"#,
-            #"(?i)\\s*[-–—]\\s*(?:live|concert|remix|无损|现场版?|演唱会版?|伴奏版?|标准版)\\s*$"#
+            #"(?i)\s*[（(\[【]\s*(?:live|concert|remix|instrumental|acoustic|remaster(?:ed)?|official|original|无损|现场版?|演唱会版?|伴奏版?|混音版?|标准版|官方版|原版)\s*[)）\]】]\s*$"#,
+            #"(?i)\s*[-–—]\s*(?:live|concert|remix|无损|现场版?|演唱会版?|伴奏版?|标准版)\s*$"#
         ]
         for pattern in suffixes {
             result = result.replacingOccurrences(of: pattern, with: "",
