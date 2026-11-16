@@ -154,7 +154,13 @@ struct GDStudioMusicSearchService {
                 title: row["name"] as? String ?? "未知歌曲",
                 artist: artist,
                 album: album,
-                artworkURL: nil,
+                artworkURL: ((row["pic_url"] as? String)
+                    ?? (row["picUrl"] as? String)
+                    ?? (row["cover"] as? String)
+                    ?? (row["imgurl"] as? String)).flatMap { raw -> URL? in
+                        guard let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+                        return url
+                    },
                 duration: parsedDuration,
                 hash: row["hash"] as? String,
                 albumID: row["album_id"].map { String(describing: $0) },
@@ -505,7 +511,10 @@ struct GDStudioMusicSearchService {
                 source: .qq, sourceID: mid,
                 title: (row["title"] as? String) ?? (row["name"] as? String) ?? "",
                 artist: singers, album: album["name"] as? String,
-                artworkURL: nil, duration: duration, hash: nil,
+                artworkURL: (album["mid"] as? String).flatMap { mid in
+                    mid.isEmpty ? nil : URL(string: "https://y.gtimg.cn/music/photo_new/T002R300x300M000\(mid).jpg")
+                },
+                duration: duration, hash: nil,
                 albumID: album["mid"] as? String, pictureID: nil, lyricID: nil
             )
         }
