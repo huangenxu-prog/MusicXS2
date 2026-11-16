@@ -282,7 +282,9 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
 
         func makeCandidates(from groups: [[MusicSong]]) -> [(MusicSong, Int)] {
             groups.flatMap { $0 }
-                .filter { $0.source != song.source }
+                // Same-platform re-search may yield a usable ID when the catalog ID
+                // attached to the original item is stale or incompatible.
+                .filter { $0.source != song.source || $0.sourceID != song.sourceID }
                 .compactMap { candidate -> (MusicSong, Int)? in
                     let score = matchScore(original: song, candidate: candidate)
                     guard score > 0, seen.insert(candidate.id).inserted else { return nil }
@@ -295,10 +297,16 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
         }
 
         func resolveCandidates(_ candidates: [(MusicSong, Int)]) async throws -> URL? {
-            // Limit simultaneous requests to the strongest matching song on each
-            // platform. Kuwo and Kugou therefore compete at the same time.
-            var selected = Set<MusicSource>()
-            let representatives = candidates.filter { selected.insert($0.0.source).inserted }
+            // Permit two matched IDs per platform: the highest-ranked catalog hit
+            // may not resolve in any JS even when the second hit does.
+            var counts: [MusicSource: Int] = [:]
+            let representatives = candidates.filter { candidate in
+                let source = candidate.0.source
+                let count = counts[source, default: 0]
+                guard count < 2 else { return false }
+                counts[source] = count + 1
+                return true
+            }
             guard !representatives.isEmpty else { return nil }
             return await withTaskGroup(of: (URL?, String?).self) { group in
                 for (candidate, score) in representatives {
