@@ -28,6 +28,25 @@ final class LXSourceLibrary {
         }
     }
 
+    private struct BundledScript: Decodable {
+        let id: String
+        let name: String
+        let contents: String
+    }
+
+    private func bundledScripts() -> [BundledScript] {
+        guard let url = Bundle.main.url(forResource: "BundledLXSources", withExtension: "json"),
+              let data = try? Data(contentsOf: url),
+              let scripts = try? JSONDecoder().decode([BundledScript].self, from: data) else {
+            return []
+        }
+        return scripts
+    }
+
+    func isBundled(id: String) -> Bool {
+        bundledScripts().contains { $0.id == id }
+    }
+
     private let selectedKey = "musicx.lx.selected-source.v1"
     private let approvedKey = "musicx.lx.approved-source-ids.v1"
     private let directory: URL
@@ -72,10 +91,11 @@ final class LXSourceLibrary {
     }
 
     func listIdentifiers() throws -> [String] {
-        try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        let localIDs = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "js" }
             .map { $0.deletingPathExtension().lastPathComponent }
             .sorted()
+        return bundledScripts().map(\.id) + localIDs
     }
 
     var selectedID: String? {
@@ -89,18 +109,24 @@ final class LXSourceLibrary {
 
     func approve(id: String) throws {
         _ = try load(id: id)
+        guard !isBundled(id: id) else { return }
         var ids = approvedIDs
         ids.insert(id.lowercased())
         UserDefaults.standard.set(Array(ids).sorted(), forKey: approvedKey)
     }
 
     func select(id: String) throws {
+        if isBundled(id: id) {
+            selectedID = id
+            return
+        }
         let url = try scriptURL(for: id)
         guard FileManager.default.fileExists(atPath: url.path) else { throw LibraryError.invalidIdentifier }
         selectedID = id.lowercased()
     }
 
     func filename(id: String) throws -> String {
+        if let builtin = bundledScripts().first(where: { $0.id == id }) { return builtin.name }
         _ = try scriptURL(for: id)
         let url = directory.appendingPathComponent(id.lowercased()).appendingPathExtension("name")
         let stored = (try? String(contentsOf: url, encoding: .utf8)) ?? id
@@ -116,6 +142,7 @@ final class LXSourceLibrary {
     }
 
     func load(id: String) throws -> String {
+        if let builtin = bundledScripts().first(where: { $0.id == id }) { return builtin.contents }
         let url = try scriptURL(for: id)
         let text = try String(contentsOf: url, encoding: .utf8)
         guard !Self.looksLikeHTML(text) else { throw LibraryError.htmlInsteadOfScript }
@@ -123,6 +150,7 @@ final class LXSourceLibrary {
     }
 
     func remove(id: String) throws {
+        guard !isBundled(id: id) else { throw LibraryError.invalidIdentifier }
         var ids = approvedIDs
         ids.remove(id.lowercased())
         UserDefaults.standard.set(Array(ids).sorted(), forKey: approvedKey)
