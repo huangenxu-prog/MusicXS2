@@ -126,13 +126,14 @@ private struct CrossPlatformFallbackProvider: MusicResourceProvider {
     let identifier = "cross-platform-matched-fallback"
     let displayName = "跨平台匹配备用音源"
     let session: URLSession
+    let excludedURLIDs: Set<String>
 
     func resolve(song: MusicSong, quality: MusicQuality) async throws -> ResolvedMusicResource? {
         guard let url = try await LXMusicURLResolver(session: session)
-            .resolveCrossPlatformFallback(song: song, quality: quality) else {
+            .resolveCrossPlatformFallback(song: song, quality: quality, excludedURLIDs: excludedURLIDs) else {
             return nil
         }
-        return ResolvedMusicResource(url: url, providerID: identifier, providerName: displayName)
+        return ResolvedMusicResource(url: url, providerID: LXMusicURLResolver.fallbackURLID(url), providerName: displayName)
     }
 }
 
@@ -312,20 +313,20 @@ struct MusicResourceEngine {
             // of the 18-channel pool. Imported scripts and matched catalogs race.
             providers = [
                 ImportedLXSourceProvider(excludedScriptIDs: excludingProviderIDs),
-                CrossPlatformFallbackProvider(session: session)
+                CrossPlatformFallbackProvider(session: session, excludedURLIDs: excludingProviderIDs)
             ]
         case .netease:
             providers = [
                 NetEaseNativeAudioProvider(session: session),
                 KumonePyncmdAudioSourceProvider(),
                 ImportedLXSourceProvider(excludedScriptIDs: excludingProviderIDs),
-                CrossPlatformFallbackProvider(session: session)
+                CrossPlatformFallbackProvider(session: session, excludedURLIDs: excludingProviderIDs)
             ]
         default:
             providers = [
                 MusicXLegacySupplierLibrary(session: session),
                 ImportedLXSourceProvider(excludedScriptIDs: excludingProviderIDs),
-                CrossPlatformFallbackProvider(session: session)
+                CrossPlatformFallbackProvider(session: session, excludedURLIDs: excludingProviderIDs)
             ]
         }
 
