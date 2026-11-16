@@ -798,7 +798,7 @@ struct MusicDiscoveryPage: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    Text("粘贴 QQ 音乐、网易云或酷狗的歌单分享链接")
+                    Text("粘贴 QQ 音乐或网易云的歌单分享链接")
                         .font(.system(size: 15))
                         .foregroundStyle(MusicXTheme.muted)
                     TextField("https://y.qq.com/...", text: $qqImportLink, axis: .vertical)
@@ -972,7 +972,7 @@ struct MusicDiscoveryPage: View {
             Text("还没有属于你的歌单")
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(.white)
-            Text("可以从网易云、QQ 音乐或酷狗导入。")
+            Text("可以从网易云或 QQ 音乐导入。")
                 .font(.system(size: 13))
                 .foregroundStyle(MusicXTheme.muted)
         }
