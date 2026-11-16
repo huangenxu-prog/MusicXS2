@@ -15,6 +15,7 @@ final class LXSourceLibrary {
         case tooLarge
         case emptyScript
         case invalidIdentifier
+        case htmlInsteadOfScript
 
         var errorDescription: String? {
             switch self {
@@ -22,6 +23,7 @@ final class LXSourceLibrary {
             case .tooLarge: return "音源文件不能超过 2 MB"
             case .emptyScript: return "音源脚本内容为空"
             case .invalidIdentifier: return "音源标识无效"
+            case .htmlInsteadOfScript: return "下载内容是 HTML 网页，不是 JS 音源。请使用 GitHub raw 原始直链，或检查代理地址。"
             }
         }
     }
@@ -58,6 +60,7 @@ final class LXSourceLibrary {
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw LibraryError.emptyScript
         }
+        guard !Self.looksLikeHTML(text) else { throw LibraryError.htmlInsteadOfScript }
         let id = UUID().uuidString.lowercased()
         let target = directory.appendingPathComponent(id).appendingPathExtension("js")
         try data.write(to: target, options: .atomic)
@@ -102,7 +105,9 @@ final class LXSourceLibrary {
 
     func load(id: String) throws -> String {
         let url = try scriptURL(for: id)
-        return try String(contentsOf: url, encoding: .utf8)
+        let text = try String(contentsOf: url, encoding: .utf8)
+        guard !Self.looksLikeHTML(text) else { throw LibraryError.htmlInsteadOfScript }
+        return text
     }
 
     func remove(id: String) throws {
@@ -110,6 +115,14 @@ final class LXSourceLibrary {
         let nameURL = directory.appendingPathComponent(id.lowercased()).appendingPathExtension("name")
         try? FileManager.default.removeItem(at: nameURL)
         if selectedID == id.lowercased() { selectedID = try listIdentifiers().first }
+    }
+
+    private static func looksLikeHTML(_ script: String) -> Bool {
+        let trimmed = script.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prefix = trimmed.prefix(512).lowercased()
+        return prefix.hasPrefix("<!doctype") || prefix.hasPrefix("<html") ||
+            prefix.hasPrefix("<head") || prefix.hasPrefix("<body") ||
+            prefix.hasPrefix("<?xml")
     }
 
     /// Extract LX source display metadata without executing untrusted JavaScript.
