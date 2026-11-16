@@ -83,6 +83,10 @@ struct MusicDiscoveryPage: View {
     @State private var qqImportPreview: ImportedPlaylistSnapshot?
     @State private var qqImportError: String?
     @State private var isQQImportLoading = false
+    @State private var playlistToDelete: ImportedPlaylistSnapshot?
+    @State private var isDeletePlaylistAlertPresented = false
+    @State private var songToRemove: MusicSong?
+    @State private var isRemoveSongAlertPresented = false
     @State private var renamingPlaylistID: String?
     @State private var renamingPlaylistName = ""
     @State private var isRenamePlaylistPresented = false
@@ -286,6 +290,18 @@ struct MusicDiscoveryPage: View {
             Button("保存") { renameImportedPlaylist() }
         } message: {
             Text("仅修改 MusicXS2 中显示的名称，不影响 QQ 音乐原歌单。")
+        }
+        .alert("删除导入的歌单？", isPresented: $isDeletePlaylistAlertPresented) {
+            Button("取消", role: .cancel) { playlistToDelete = nil }
+            Button("删除", role: .destructive) { deleteImportedPlaylist() }
+        } message: {
+            Text("只删除 MusicXS2 本地歌单，不影响原音乐平台及单独收藏的歌曲。")
+        }
+        .alert("从歌单移出这首歌？", isPresented: $isRemoveSongAlertPresented) {
+            Button("取消", role: .cancel) { songToRemove = nil }
+            Button("移出", role: .destructive) { removeImportedSong() }
+        } message: {
+            Text("只修改本地导入的歌单，不删除平台原曲目或单独收藏。")
         }
         .sheet(isPresented: $isQQImportPresented) {
             qqImportSheet
@@ -739,7 +755,7 @@ struct MusicDiscoveryPage: View {
                                 .font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(.white)
                                 .lineLimit(1)
-                            Text("QQ 音乐 · \(item.songs.count) 首")
+                            Text("\(item.playlist.source.displayName) · \(item.songs.count) 首")
                                 .font(.system(size: 12))
                                 .foregroundStyle(MusicXTheme.muted)
                                 .lineLimit(1)
@@ -754,6 +770,12 @@ struct MusicDiscoveryPage: View {
                             isRenamePlaylistPresented = true
                         } label: {
                             Label("重命名", systemImage: "pencil")
+                        }
+                        Button(role: .destructive) {
+                            playlistToDelete = item
+                            isDeletePlaylistAlertPresented = true
+                        } label: {
+                            Label("删除歌单", systemImage: "trash")
                         }
                     }
                 }
@@ -776,7 +798,7 @@ struct MusicDiscoveryPage: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    Text("粘贴 QQ 音乐歌单分享链接")
+                    Text("粘贴 QQ 音乐、网易云或酷狗的歌单分享链接")
                         .font(.system(size: 15))
                         .foregroundStyle(MusicXTheme.muted)
                     TextField("https://y.qq.com/...", text: $qqImportLink, axis: .vertical)
@@ -790,7 +812,7 @@ struct MusicDiscoveryPage: View {
                     } label: {
                         HStack(spacing: 9) {
                             if isQQImportLoading { ProgressView().tint(.white) }
-                            Text("解析 QQ 歌单")
+                            Text("解析歌单")
                         }
                         .frame(maxWidth: .infinity)
                         .frame(height: 46)
@@ -816,7 +838,7 @@ struct MusicDiscoveryPage: View {
                                 Text(preview.playlist.name)
                                     .font(.system(size: 17, weight: .semibold))
                                     .foregroundStyle(.white)
-                                Text("QQ 音乐 · \(preview.songs.count) 首")
+                                Text("\(preview.playlist.source.displayName) · \(preview.songs.count) 首")
                                     .font(.system(size: 13))
                                     .foregroundStyle(MusicXTheme.muted)
                             }
@@ -835,7 +857,7 @@ struct MusicDiscoveryPage: View {
                 .padding(20)
             }
             .background(Color(red: 0.06, green: 0.07, blue: 0.15))
-            .navigationTitle("导入 QQ 歌单")
+            .navigationTitle("导入歌单")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -852,7 +874,7 @@ struct MusicDiscoveryPage: View {
         qqImportError = nil
         defer { isQQImportLoading = false }
         do {
-            let result = try await PlatformCollectionCatalog().importQQPlaylist(shareText: qqImportLink)
+            let result = try await PlatformCollectionCatalog().importSharedPlaylist(shareText: qqImportLink)
             qqImportPreview = ImportedPlaylistSnapshot(playlist: result.playlist, songs: result.songs)
         } catch {
             qqImportError = "解析失败：\(error.localizedDescription)"
@@ -893,6 +915,36 @@ struct MusicDiscoveryPage: View {
         importedPlaylistsJSON = text
     }
 
+    private func deleteImportedPlaylist() {
+        guard let target = playlistToDelete else { return }
+        defer { playlistToDelete = nil }
+        saveImportedPlaylists(importedPlaylists.filter { $0.id != target.id })
+    }
+
+    private func removeImportedSong() {
+        guard let target = songToRemove else { return }
+        defer { songToRemove = nil }
+        guard case .playlistByID(let playlist) = route else { return }
+        var items = importedPlaylists
+        guard let i = items.firstIndex(where: { $0.id == playlist.id }) else { return }
+        let existing = items[i]
+        let updatedSongs = existing.songs.filter { $0.id != target.id }
+        var updated = ImportedPlaylistSnapshot(playlist: existing.playlist, songs: updatedSongs)
+        updated.customName = existing.customName
+        items[i] = updated
+        if saveImportedPlaylists(items) {
+            songs.removeAll { $0.id == target.id }
+        }
+    }
+
+    @discardableResult
+    private func saveImportedPlaylists(_ items: [ImportedPlaylistSnapshot]) -> Bool {
+        guard let data = try? JSONEncoder().encode(items),
+              let raw = String(data: data, encoding: .utf8) else { return false }
+        importedPlaylistsJSON = raw
+        return true
+    }
+
     private var favoritesEmptyState: some View {
         VStack(spacing: 12) {
             Image(systemName: "heart")
@@ -920,7 +972,7 @@ struct MusicDiscoveryPage: View {
             Text("还没有属于你的歌单")
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(.white)
-            Text("以后可以从网易云、QQ 音乐或酷狗导入。")
+            Text("可以从网易云、QQ 音乐或酷狗导入。")
                 .font(.system(size: 13))
                 .foregroundStyle(MusicXTheme.muted)
         }
@@ -1112,6 +1164,15 @@ struct MusicDiscoveryPage: View {
                 } label: {
                     Label(isFavorite(song) ? "取消收藏" : "收藏歌曲",
                           systemImage: isFavorite(song) ? "heart.slash" : "heart")
+                }
+                if case .playlistByID(let playlist) = route,
+                   importedPlaylists.contains(where: { $0.id == playlist.id }) {
+                    Button(role: .destructive) {
+                        songToRemove = song
+                        isRemoveSongAlertPresented = true
+                    } label: {
+                        Label("从此歌单移出", systemImage: "minus.circle")
+                    }
                 }
             } label: {
                 Image(systemName: "ellipsis")

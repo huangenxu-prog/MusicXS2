@@ -215,6 +215,105 @@ struct PlatformCollectionCatalog {
         return (playlist, tracks)
     }
 
+
+    // Parse only exact public share links; never treat a GCID as a numeric specialid.
+    func importSharedPlaylist(shareText: String) async throws -> (playlist: MusicPlaylist, songs: [MusicSong]) {
+        let text = shareText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let token = text.split(whereSeparator: { $0.isWhitespace }).first(where: { $0.hasPrefix("https://") || $0.hasPrefix("http://") }),
+              let parts = URLComponents(string: String(token)),
+              let host = parts.host?.lowercased() else {
+            throw MusicSourceError.invalidResponse("请粘贴有效的公开歌单链接")
+        }
+        if host == "qq.com" || host.hasSuffix(".qq.com") {
+            return try await importQQPlaylist(shareText: text)
+        }
+        if host == "music.163.com" || host.hasSuffix(".music.163.com") {
+            guard let id = parts.queryItems?.first(where: { $0.name == "id" })?.value,
+                  !id.isEmpty, id.allSatisfy(\.isNumber) else {
+                throw MusicSourceError.invalidResponse("网易云歌单编号无效")
+            }
+            var url = URLComponents(string: "https://music.163.com/api/playlist/detail")!
+            url.queryItems = [URLQueryItem(name: "id", value: id)]
+            var request = URLRequest(url: url.url!)
+            request.setValue("https://music.163.com/", forHTTPHeaderField: "Referer")
+            let root = try await json(for: request)
+            let meta = root["result"] as? [String: Any] ?? root["playlist"] as? [String: Any] ?? [:]
+            let tracks = meta["tracks"] as? [[String: Any]] ?? []
+            let trackIds = (meta["trackIds"] as? [[String: Any]] ?? []).compactMap { $0["id"].map { String(describing: $0) } }
+            func decodeSong(_ row: [String: Any]) -> MusicSong? {
+                guard let rawID = row["id"] else { return nil }
+                let songID = String(describing: rawID)
+                let artists = (row["ar"] as? [[String: Any]] ?? row["artists"] as? [[String: Any]] ?? [])
+                    .compactMap { $0["name"] as? String }.joined(separator: " / ")
+                let album = row["al"] as? [String: Any] ?? row["album"] as? [String: Any] ?? [:]
+                return MusicSong(source: .netease, sourceID: songID,
+                                 title: row["name"] as? String ?? "未知歌曲",
+                                 artist: artists.isEmpty ? "未知歌手" : artists,
+                                 album: album["name"] as? String,
+                                 artworkURL: (album["picUrl"] as? String).flatMap(URL.init(string:)),
+                                 duration: (row["dt"] as? NSNumber ?? row["duration"] as? NSNumber).map { $0.doubleValue / 1000 },
+                                 hash: nil, albumID: album["id"].map { String(describing: $0) },
+                                 pictureID: nil, lyricID: songID)
+            }
+            var lookup: [String: MusicSong] = [:]
+            for row in tracks { if let song = decodeSong(row) { lookup[song.sourceID] = song } }
+            let order = trackIds.isEmpty ? tracks.compactMap { $0["id"].map { String(describing: $0) } } : trackIds
+            for start in stride(from: 0, to: min(order.count, 5000), by: 100) {
+                try Task.checkCancellation()
+                let ids = order[start..<min(start + 100, order.count, 5000)].filter { lookup[$0] == nil }
+                guard !ids.isEmpty else { continue }
+                var songURL = URLComponents(string: "https://music.163.com/api/song/detail")!
+                songURL.queryItems = [URLQueryItem(name: "ids", value: "[" + ids.joined(separator: ",") + "]")]
+                var detailRequest = URLRequest(url: songURL.url!)
+                detailRequest.setValue("https://music.163.com/", forHTTPHeaderField: "Referer")
+                if let result = try? await json(for: detailRequest),
+                   let rows = result["songs"] as? [[String: Any]] {
+                    for row in rows { if let song = decodeSong(row) { lookup[song.sourceID] = song } }
+                }
+            }
+            var seen = Set<String>()
+            let result = order.compactMap { lookup[$0] }.filter { seen.insert($0.id).inserted }
+            guard !result.isEmpty else { throw MusicSourceError.invalidResponse("网易云未返回可导入的歌曲") }
+            let playlist = MusicPlaylist(source: .netease, sourceID: id,
+                name: meta["name"] as? String ?? "网易云歌单 \(id)",
+                creator: nil, description: meta["description"] as? String,
+                artworkURL: (meta["coverImgUrl"] as? String).flatMap(URL.init(string:)),
+                trackCount: result.count, provenance: .platformRecommended)
+            return (playlist, result)
+        }
+        if host == "kugou.com" || host.hasSuffix(".kugou.com") {
+            let pathID = parts.path.split(separator: "/").last.map(String.init) ?? ""
+            var specialID = parts.queryItems?.first(where: { $0.name.lowercased() == "specialid" })?.value
+            if specialID == nil && !pathID.isEmpty && pathID.allSatisfy(\.isNumber) { specialID = pathID }
+            if specialID == nil && parts.path.contains("gcid_") {
+                var request = URLRequest(url: URL(string: String(token))!)
+                request.timeoutInterval = 15
+                request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148", forHTTPHeaderField: "User-Agent")
+                let (body, response) = try await session.data(for: request)
+                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+                      let html = String(data: body, encoding: .utf8) else {
+                    throw MusicSourceError.invalidResponse("酷狗分享页无法读取")
+                }
+                let pattern = #"(?:specialid|special_id|specialId)[^0-9]{0,30}([0-9]{1,15})"#
+                if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+                   let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
+                   let range = Range(match.range(at: 1), in: html) {
+                    specialID = String(html[range])
+                }
+            }
+            guard let id = specialID, !id.isEmpty, id.allSatisfy(\.isNumber) else {
+                throw MusicSourceError.invalidResponse("酷狗 GCID 无法核实真实歌单编号，未导入错误数据")
+            }
+            let songs = try await DomesticPlaylistDiscoveryService().playlistTracks(playlistID: id, source: .kugou, count: 300)
+            guard !songs.isEmpty else { throw MusicSourceError.invalidResponse("酷狗歌单没有返回歌曲") }
+            let playlist = MusicPlaylist(source: .kugou, sourceID: id,
+                name: "酷狗歌单 \(id)", creator: nil, description: nil,
+                artworkURL: nil, trackCount: songs.count, provenance: .platformRecommended)
+            return (playlist, songs)
+        }
+        throw MusicSourceError.invalidResponse("当前仅支持 QQ 音乐、网易云和酷狗歌单")
+    }
+
     func tracks(for collection: PlatformCollection, count: Int = 50) async throws -> [MusicSong] {
         guard count > 0 else { return [] }
         switch collection.provider {
