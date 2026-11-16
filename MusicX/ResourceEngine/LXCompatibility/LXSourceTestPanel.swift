@@ -311,7 +311,7 @@ struct LXSourceTestPanel: View {
             let report = await probePreviewURL(url)
             // Ignore a stale probe if a later search or platform switch replaced the URL.
             if previewURL == url {
-                message = "取链音质：\\(quality)。\\(report)；地址：\\(url.absoluteString)"
+                message = "取链音质：\(quality)。\(report)；地址：\(url.absoluteString)"
             }
         } catch {
             message = "真实取链失败：\(error.localizedDescription)"
@@ -344,7 +344,7 @@ struct LXSourceTestPanel: View {
             let mime = (http.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased()
             let domain = http.url?.host ?? "未知"
             guard (200...299).contains(http.statusCode) else {
-                return "HTTP 检查失败：状态码 \\(http.statusCode)，域名 \\(domain)"
+                return "HTTP 检查失败：状态码 \(http.statusCode)，域名 \(domain)"
             }
             var prefix = [UInt8]()
             for try await byte in bytes {
@@ -352,14 +352,14 @@ struct LXSourceTestPanel: View {
                 if prefix.count >= 128 { break }
             }
             guard !prefix.isEmpty else {
-                return "HTTP 检查失败：返回了空数据（\\(domain)）"
+                return "HTTP 检查失败：返回了空数据（\(domain)）"
             }
             let rawText = String(bytes: prefix, encoding: .utf8)?.lowercased() ?? ""
             let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
             let isPage = trimmed.hasPrefix("{") || trimmed.hasPrefix("[") ||
                 trimmed.hasPrefix("<") || rawText.contains("<html") || rawText.contains("<!doctype")
             if isPage || mime.contains("application/json") || mime.contains("text/html") {
-                return "HTTP 检查失败：服务器返回网页或 JSON，而不是音频（\\(domain)）"
+                return "HTTP 检查失败：服务器返回网页或 JSON，而不是音频（\(domain)）"
             }
             let isID3 = prefix.starts(with: [0x49, 0x44, 0x33])
             let isMP3 = prefix.count >= 2 && prefix[0] == 0xFF && (prefix[1] & 0xE0) == 0xE0
@@ -367,14 +367,14 @@ struct LXSourceTestPanel: View {
             let isOgg = prefix.starts(with: [0x4F, 0x67, 0x67, 0x53])
             let isMp4 = prefix.count >= 8 && Array(prefix[4..<8]) == [0x66, 0x74, 0x79, 0x70]
             if isID3 || isMP3 || isFLAC || isOgg || isMp4 {
-                return "HTTP 检查通过：\\(http.statusCode)，检测到音频文件特征（\\(domain)）；尚未确认出声"
+                return "HTTP 检查通过：\(http.statusCode)，检测到音频文件特征（\(domain)）；尚未确认出声"
             }
             if mime.contains("audio/") || mime.contains("application/octet-stream") {
-                return "HTTP 检查初步通过：\\(http.statusCode)，音频 MIME=\\(mime)（\\(domain)），文件头未识别；尚未确认出声"
+                return "HTTP 检查初步通过：\(http.statusCode)，音频 MIME=\(mime)（\(domain)），文件头未识别；尚未确认出声"
             }
-            return "HTTP \\(http.statusCode)；文件头和 MIME 未能确认音频（\\(domain)），需要进一步验证"
+            return "HTTP \(http.statusCode)；文件头和 MIME 未能确认音频（\(domain)），需要进一步验证"
         } catch {
-            return "HTTP 检查未通过：\\(error.localizedDescription)"
+            return "HTTP 检查未通过：\(error.localizedDescription)"
         }
     }
 
