@@ -61,9 +61,10 @@ final class LXSourceLibrary {
         let id = UUID().uuidString.lowercased()
         let target = directory.appendingPathComponent(id).appendingPathExtension("js")
         try data.write(to: target, options: .atomic)
-        try Data(filename.utf8).write(to: directory.appendingPathComponent(id).appendingPathExtension("name"), options: .atomic)
+        let displayName = Self.displayFilename(script: text, fallback: filename)
+        try Data(displayName.utf8).write(to: directory.appendingPathComponent(id).appendingPathExtension("name"), options: .atomic)
         if selectedID == nil { selectedID = id }
-        return Script(id: id, filename: filename, contents: text)
+        return Script(id: id, filename: displayName, contents: text)
     }
 
     func listIdentifiers() throws -> [String] {
@@ -87,7 +88,16 @@ final class LXSourceLibrary {
     func filename(id: String) throws -> String {
         _ = try scriptURL(for: id)
         let url = directory.appendingPathComponent(id.lowercased()).appendingPathExtension("name")
-        return (try? String(contentsOf: url, encoding: .utf8)) ?? id
+        let stored = (try? String(contentsOf: url, encoding: .utf8)) ?? id
+        if stored == "online-source.js" || stored == "latest.js" {
+            let script = try load(id: id)
+            let resolved = Self.displayFilename(script: script, fallback: stored)
+            if resolved != stored {
+                try? Data(resolved.utf8).write(to: url, options: .atomic)
+            }
+            return resolved
+        }
+        return stored
     }
 
     func load(id: String) throws -> String {
@@ -100,6 +110,23 @@ final class LXSourceLibrary {
         let nameURL = directory.appendingPathComponent(id.lowercased()).appendingPathExtension("name")
         try? FileManager.default.removeItem(at: nameURL)
         if selectedID == id.lowercased() { selectedID = try listIdentifiers().first }
+    }
+
+    /// Extract LX source display metadata without executing untrusted JavaScript.
+    /// The source header convention is: * @name Human-readable source name
+    private static func displayFilename(script: String, fallback: String) -> String {
+        let header = String(script.prefix(4096))
+        let pattern = #"(?m)^\\s*\\*\\s*@name\\s+([^\\r\\n]+)"#
+        if let range = header.range(of: pattern, options: .regularExpression) {
+            let line = String(header[range])
+            if let marker = line.range(of: "@name") {
+                let name = line[marker.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: #"\\s*\\*/\\s*$"#, with: "", options: .regularExpression)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !name.isEmpty { return String(name.prefix(80)) }
+            }
+        }
+        return fallback
     }
 
     private func scriptURL(for id: String) throws -> URL {
