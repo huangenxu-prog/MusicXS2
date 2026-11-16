@@ -208,7 +208,12 @@ struct LXSourceTestPanel: View {
             let platforms = host.registeredSources.keys.sorted()
             let events = host.initializationEvents.suffix(8).joined(separator: "；")
             if ready {
-                let detail = platforms.map { platform -> String in\n                    let metadata = host.registeredSources[platform] as? [String: Any]\n                    let qualities = metadata?["qualitys"] as? [String] ?? []\n                    return "\(platform)[\(qualities.joined(separator: ", "))]"\n                }.joined(separator: "；")\n                message = "初始化完成，平台及音质：\(detail)。事件：\(events)"
+                let detail = platforms.map { platform -> String in
+                    let metadata = host.registeredSources[platform] as? [String: Any]
+                    let qualities = metadata?["qualitys"] as? [String] ?? []
+                    return "\(platform)[\(qualities.joined(separator: ", "))]"
+                }.joined(separator: "；")
+                message = "初始化完成，平台及音质：\(detail)。事件：\(events)"
             } else {
                 message = "脚本加载完成，但 8 秒内未注册音源。收到 inited：\(host.didReceiveInitialization)；JS 错误：\(host.lastError ?? "无")；事件：\(events.isEmpty ? "无" : events)"
             }
