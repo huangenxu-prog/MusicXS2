@@ -659,7 +659,7 @@ struct MusicDiscoveryPage: View {
     private var dailyDiscoveryHeader: some View {
         playlistDetailHeader(
             title: "每日推荐",
-            subtitle: "网易云 + QQ 音乐",
+            subtitle: nil,
             countLabel: "每日精选 · \(songs.count) 首",
             categoryLabel: "每日推荐"
         ) {
