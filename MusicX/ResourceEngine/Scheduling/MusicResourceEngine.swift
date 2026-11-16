@@ -120,6 +120,22 @@ private final class ResourceProviderCircuitBreaker {
     }
 }
 
+/// Cross-platform fallback is isolated from the source-native providers.
+/// It searches by title and artist and resolves using the matched platform's own ID.
+private struct CrossPlatformFallbackProvider: MusicResourceProvider {
+    let identifier = "cross-platform-matched-fallback"
+    let displayName = "跨平台匹配备用音源"
+    let session: URLSession
+
+    func resolve(song: MusicSong, quality: MusicQuality) async throws -> ResolvedMusicResource? {
+        guard let url = try await LXMusicURLResolver(session: session)
+            .resolveCrossPlatformFallback(song: song, quality: quality) else {
+            return nil
+        }
+        return ResolvedMusicResource(url: url, providerID: identifier, providerName: displayName)
+    }
+}
+
 /// The middle layer between the player-facing resolver and external supplier libraries.
 /// It intentionally does not own playback URL caching; MusicCache remains in the
 /// existing LXMusicURLResolver compatibility boundary.
@@ -149,12 +165,14 @@ struct MusicResourceEngine {
         case .qq:
             providers = [
                 (QQGDStudioAudioProvider(session: session), 0, 1_000),
-                (QQChkszAudioProvider(session: session), 1, 900)
+                (QQChkszAudioProvider(session: session), 1, 900),
+                (CrossPlatformFallbackProvider(session: session), 2, 50)
             ]
         case .netease:
             providers = [
                 (NetEaseNativeAudioProvider(session: session), 0, 1_000),
-                (KumonePyncmdAudioSourceProvider(), 1, 100)
+                (KumonePyncmdAudioSourceProvider(), 1, 100),
+                (CrossPlatformFallbackProvider(session: session), 2, 50)
             ]
         default:
             providers = [
