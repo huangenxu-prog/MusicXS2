@@ -39,7 +39,7 @@ struct LXSourceTestPanel: View {
                                 do {
                                     try getLibrary().select(id: id)
                                     selectedID = id
-                                    message = "已切换测试音源。尚未接入正式播放。"
+                                    message = "已切换测试音源。通过试听后将自动加入正式播放通道。"
                                 } catch { message = error.localizedDescription }
                             } label: {
                                 HStack {
@@ -47,7 +47,7 @@ struct LXSourceTestPanel: View {
                                         .foregroundStyle(selectedID == id ? .green : .secondary)
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text((try? getLibrary().filename(id: id)) ?? id).lineLimit(1)
-                                        Text(selectedID == id ? "当前选中 · 未接入正式播放" : "点击切换为当前测试音源")
+                                        Text((try? getLibrary().approvedIDs.contains(id)) == true ? "已通过试听 · 正式播放通道已启用" : "测试音源 · 试听成功后自动启用")
                                             .font(.caption2).foregroundStyle(.secondary)
                                     }
                                 }
@@ -393,7 +393,16 @@ struct LXSourceTestPanel: View {
                     return
                 }
                 if player.timeControlStatus == .playing {
-                    message = "播放器报告正在播放；请确认是否听到声音。"
+                    if let id = selectedID {
+                        do {
+                            try getLibrary().approve(id: id)
+                            message = "播放器报告正在播放；该音源已加入正式播放通道。请确认是否听到声音。"
+                        } catch {
+                            message = "播放器正在播放，但启用音源失败：\(error.localizedDescription)"
+                        }
+                    } else {
+                        message = "播放器报告正在播放；请确认是否听到声音。"
+                    }
                     return
                 }
             }
