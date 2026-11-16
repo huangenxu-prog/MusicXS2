@@ -88,7 +88,7 @@ struct LXSourceTestPanel: View {
                                 }
                             }
                             if let error = searchErrors[platform] {
-                                Text("搜索失败：\\(error)")
+                                Text("搜索失败：\(error)")
                                     .font(.caption).foregroundStyle(.secondary)
                             } else if let songs = searchResults[platform] {
                                 if songs.isEmpty {
@@ -304,7 +304,7 @@ struct LXSourceTestPanel: View {
             }
         }
         let total = searchResults.values.reduce(0) { $0 + $1.count }
-        message = "四个平台搜索完成：共 \\(total) 首候选歌曲；每个平台最多 5 首。点选任意歌曲即可测试对应平台。"
+        message = "四个平台搜索完成：共 \(total) 首候选歌曲；每个平台最多 5 首。点选任意歌曲即可测试对应平台。"
     }
 
     @MainActor
