@@ -216,7 +216,7 @@ struct PlatformCollectionCatalog {
     }
 
 
-    // Parse only exact public share links; never treat a GCID as a numeric specialid.
+    // Import public QQ and NetEase share links only.
     func importSharedPlaylist(shareText: String) async throws -> (playlist: MusicPlaylist, songs: [MusicSong]) {
         let text = shareText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let token = text.split(whereSeparator: { $0.isWhitespace }).first(where: { $0.hasPrefix("https://") || $0.hasPrefix("http://") }),
@@ -281,37 +281,7 @@ struct PlatformCollectionCatalog {
                 trackCount: result.count, provenance: .platformRecommended)
             return (playlist, result)
         }
-        if host == "kugou.com" || host.hasSuffix(".kugou.com") {
-            let pathID = parts.path.split(separator: "/").last.map(String.init) ?? ""
-            var specialID = parts.queryItems?.first(where: { $0.name.lowercased() == "specialid" })?.value
-            if specialID == nil && !pathID.isEmpty && pathID.allSatisfy(\.isNumber) { specialID = pathID }
-            if specialID == nil && parts.path.contains("gcid_") {
-                var request = URLRequest(url: URL(string: String(token))!)
-                request.timeoutInterval = 15
-                request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148", forHTTPHeaderField: "User-Agent")
-                let (body, response) = try await session.data(for: request)
-                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-                      let html = String(data: body, encoding: .utf8) else {
-                    throw MusicSourceError.invalidResponse("酷狗分享页无法读取")
-                }
-                let pattern = #"(?:specialid|special_id|specialId)[^0-9]{0,30}([0-9]{1,15})"#
-                if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
-                   let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
-                   let range = Range(match.range(at: 1), in: html) {
-                    specialID = String(html[range])
-                }
-            }
-            guard let id = specialID, !id.isEmpty, id.allSatisfy(\.isNumber) else {
-                throw MusicSourceError.invalidResponse("酷狗 GCID 无法核实真实歌单编号，未导入错误数据")
-            }
-            let songs = try await DomesticPlaylistDiscoveryService().playlistTracks(playlistID: id, source: .kugou, count: 300)
-            guard !songs.isEmpty else { throw MusicSourceError.invalidResponse("酷狗歌单没有返回歌曲") }
-            let playlist = MusicPlaylist(source: .kugou, sourceID: id,
-                name: "酷狗歌单 \(id)", creator: nil, description: nil,
-                artworkURL: nil, trackCount: songs.count, provenance: .platformRecommended)
-            return (playlist, songs)
-        }
-        throw MusicSourceError.invalidResponse("当前仅支持 QQ 音乐、网易云和酷狗歌单")
+        throw MusicSourceError.invalidResponse("当前仅支持 QQ 音乐和网易云歌单")
     }
 
     func tracks(for collection: PlatformCollection, count: Int = 50) async throws -> [MusicSong] {
