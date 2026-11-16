@@ -327,8 +327,9 @@ struct MusicResourceEngine {
                 CrossPlatformFallbackProvider(session: session, excludedURLIDs: excludingProviderIDs)
             ]
         default:
+            // Imported LX channels and the cross-platform catalog are the
+            // only paths here. Do not silently reintroduce legacy URL backends.
             providers = [
-                MusicXLegacySupplierLibrary(session: session),
                 ImportedLXSourceProvider(excludedScriptIDs: excludingProviderIDs, excludedURLIDs: excludingProviderIDs),
                 CrossPlatformFallbackProvider(session: session, excludedURLIDs: excludingProviderIDs)
             ]
