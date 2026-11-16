@@ -206,7 +206,7 @@ struct MusicDiscoveryPage: View {
                         if case .featuredPick = route {
                             favoriteCategoryTabs
                         }
-                        if case .newReleases = route {
+                        if route.id == MusicDiscoveryRoute.newReleases.id || route.id == MusicDiscoveryRoute.daily.id {
                             HStack(spacing: 10) {
                                 Capsule().fill(MusicXTheme.blue).frame(width: 3, height: 20)
                                 Text("为你推荐")
