@@ -211,6 +211,8 @@ struct ContentView: View {
 
     @State private var songs: [AppSong] = []
     @State private var homeOfficialCollections: [MusicPlaylist] = []
+    // Limit initial all-collection grid work; append more as the user scrolls.
+    @State private var visibleCollectionCount = 18
     @State private var isLoadingOfficialCollections = false
     @State private var officialCollectionsError: String?
     @State private var isLoadingHomeSongs = false
@@ -723,8 +725,15 @@ struct ContentView: View {
                             columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3),
                             spacing: 20
                         ) {
-                            ForEach(homeOfficialCollections) { collection in
+                            ForEach(Array(homeOfficialCollections.prefix(visibleCollectionCount))) { collection in
                                 officialCollectionTile(collection: collection, width: tileWidth)
+                                    .onAppear {
+                                        // Render more rows before the user reaches the end.
+                                        guard let index = homeOfficialCollections.firstIndex(where: { $0.id == collection.id }),
+                                              index >= visibleCollectionCount - 6,
+                                              visibleCollectionCount < homeOfficialCollections.count else { return }
+                                        visibleCollectionCount = min(visibleCollectionCount + 12, homeOfficialCollections.count)
+                                    }
                             }
                         }
                         .padding(.horizontal, 16)
@@ -870,6 +879,7 @@ struct ContentView: View {
             // Each provider keeps its own playlist ID; no cross-platform merging.
             let collections = try await PlatformCollectionCatalog().remainingRecommendedCollections()
             guard !Task.isCancelled else { return }
+            visibleCollectionCount = 18
             homeOfficialCollections = collections.map { item in
                 MusicPlaylist(
                     source: item.provider == .qq ? .qq : .netease,
