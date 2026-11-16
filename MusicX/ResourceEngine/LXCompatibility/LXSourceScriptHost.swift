@@ -229,11 +229,11 @@ final class LXSourceScriptHost {
     private static let bootstrap = #"""
     (function () {
       const handlers = {};
-      var setTimeout = function (callback, delay) {
+      globalThis.setTimeout = function (callback, delay) {
         if (typeof callback !== 'function') throw new TypeError('setTimeout callback must be a function');
         return __lxSetTimeout(callback, Number(delay) || 0);
       };
-      var clearTimeout = function (id) { __lxClearTimeout(Number(id) || 0); };
+      globalThis.clearTimeout = function (id) { __lxClearTimeout(Number(id) || 0); };
       const EVENTS = { request: 'request', inited: 'inited',
                        updateAlert: 'updateAlert' };
       globalThis.lx = {
