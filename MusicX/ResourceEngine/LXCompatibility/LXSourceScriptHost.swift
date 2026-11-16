@@ -55,7 +55,10 @@ final class LXSourceScriptHost {
             self?.initializationEvents.append("event: \(event)")
             guard event == "inited" else { return }
             self?.didReceiveInitialization = true
-            self?.registeredSources = payload.toDictionary()?["sources"] as? [String: Any] ?? [:]
+            let sources = payload.toDictionary()?["sources"] as? [String: Any] ?? [:]
+            self?.registeredSources = sources
+            let platforms = sources.keys.sorted().joined(separator: ",")
+            self?.initializationEvents.append("registered platforms: \(platforms.isEmpty ? "none" : platforms)")
         }
         let complete: @convention(block) (Int, String, String) -> Void = { [weak self] id, value, error in
             if !error.isEmpty { self?.finish(id: id, result: .failure(HostError.initialization(error))) }
