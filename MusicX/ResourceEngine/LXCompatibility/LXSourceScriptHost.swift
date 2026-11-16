@@ -134,18 +134,31 @@ final class LXSourceScriptHost {
         }
         nextRequestID += 1
         let id = nextRequestID
-        let urlString: String = try await withCheckedThrowingContinuation { continuation in
-            completions[id] = { result in continuation.resume(with: result) }
-            let payload: [String: Any] = [
-                "action": "musicUrl", "source": source,
-                "info": ["type": quality, "musicInfo": musicInfo]
-            ]
-            let json = Self.jsonString(payload)
-            context.evaluateScript("__lxResolve(\(id), \(json))")
-            timeoutTasks[id] = Task { @MainActor [weak self] in
-                do { try await Task.sleep(nanoseconds: UInt64(max(timeout, 1) * 1_000_000_000)) }
-                catch { return }
-                self?.finish(id: id, result: .failure(HostError.timedOut))
+        let urlString: String = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                completions[id] = { result in continuation.resume(with: result) }
+                // Cancellation may have happened before the continuation was installed.
+                if Task.isCancelled {
+                    finish(id: id, result: .failure(CancellationError()))
+                    return
+                }
+                let payload: [String: Any] = [
+                    "action": "musicUrl", "source": source,
+                    "info": ["type": quality, "musicInfo": musicInfo]
+                ]
+                let json = Self.jsonString(payload)
+                context.evaluateScript("__lxResolve(\(id), \(json))")
+                timeoutTasks[id] = Task { @MainActor [weak self] in
+                    do { try await Task.sleep(nanoseconds: UInt64(max(timeout, 1) * 1_000_000_000)) }
+                    catch { return }
+                    self?.finish(id: id, result: .failure(HostError.timedOut))
+                }
+            }
+        } onCancel: {
+            // Cancelled competitors must release their continuations immediately,
+            // rather than keeping the task group alive for the full 15-second timeout.
+            Task { @MainActor [weak self] in
+                self?.finish(id: id, result: .failure(CancellationError()))
             }
         }
         guard let url = URL(string: urlString), ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
