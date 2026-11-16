@@ -232,19 +232,28 @@ final class LXSourceLibrary {
         var overrides = platformOverrides
         overrides[id.lowercased()] = current.sorted()
         platformOverrides = overrides
-        // A checkbox can explicitly opt an imported script into playback.
-        // Other platforms remain disabled unless selected or previously approved.
-        if enabled && !isBundled(id: id) {
-            try approve(id: id)
-        }
+        // Checkboxes never bypass the audio preview approval gate.
+        // Unapproved scripts can record preferences but cannot play until tested.
     }
 
-    func approve(id: String) throws {
+    func approve(id: String, testedPlatform: String? = nil) throws {
         _ = try load(id: id)
         guard !isBundled(id: id) else { return }
         var ids = approvedIDs
-        ids.insert(id.lowercased())
+        let key = id.lowercased()
+        let wasApproved = ids.contains(key)
+        ids.insert(key)
         UserDefaults.standard.set(Array(ids).sorted(), forKey: approvedKey)
+        // On first preview, opt in only the platform actually tested.
+        // Existing approved installs keep their previous selections.
+        if !wasApproved, let testedPlatform,
+           Self.playbackPlatforms.contains(testedPlatform) {
+            var overrides = platformOverrides
+            var selected = Set(overrides[key] ?? [])
+            selected.insert(testedPlatform)
+            overrides[key] = selected.sorted()
+            platformOverrides = overrides
+        }
     }
 
     func select(id: String) throws {
