@@ -407,11 +407,12 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
     }
 
     private func matchScore(original: MusicSong, candidate: MusicSong) -> Int {
-        AudioSourceTrackMatcher.matches(
+        AudioSourceTrackMatcher.matchScore(
             original: original,
             candidateTitle: candidate.title,
-            candidateArtist: candidate.artist
-        ) ? 100 : 0
+            candidateArtist: candidate.artist,
+            candidateDuration: candidate.duration
+        )
     }
 
     private func sourceFallbackPriority(_ source: MusicSource) -> Int {
