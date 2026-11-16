@@ -49,6 +49,8 @@ final class LXSourceLibrary {
 
     private let selectedKey = "musicx.lx.selected-source.v1"
     private let approvedKey = "musicx.lx.approved-source-ids.v1"
+    private let platformKey = "musicx.lx.enabled-platforms.v1"
+    static let playbackPlatforms: Set<String> = ["tx", "wy", "kw", "kg"]
     private let directory: URL
     private let maximumSize = 2 * 1024 * 1024
 
@@ -107,6 +109,53 @@ final class LXSourceLibrary {
         Set(UserDefaults.standard.stringArray(forKey: approvedKey) ?? [])
     }
 
+    /// Per-source selection. Existing installed sources keep their old enabled
+    /// platforms until the user explicitly changes a checkbox.
+    private var platformOverrides: [String: [String]] {
+        get { UserDefaults.standard.dictionary(forKey: platformKey) as? [String: [String]] ?? [:] }
+        set { UserDefaults.standard.set(newValue, forKey: platformKey) }
+    }
+
+    func isJiexiang(id: String) -> Bool {
+        guard let script = try? load(id: id) else { return false }
+        let header = String(script.prefix(4096)).lowercased()
+        return header.contains("@homepage https://github.com/haonanren118/jiexiang-music-source")
+            && header.contains("@name 杰翔聚合音源")
+    }
+
+    func enabledPlatforms(id: String) -> Set<String> {
+        let id = id.lowercased()
+        let defaults: Set<String> = (isBundled(id: id) || approvedIDs.contains(id))
+            ? Self.playbackPlatforms : []
+        var enabled = Set(platformOverrides[id] ?? Array(defaults))
+            .intersection(Self.playbackPlatforms)
+        // Known invalid QQ prompt audio must never reach formal playback.
+        if isJiexiang(id: id) { enabled.remove("tx") }
+        return enabled
+    }
+
+    func setPlatformEnabled(id: String, platform: String, enabled: Bool) throws {
+        guard Self.playbackPlatforms.contains(platform) else { throw LibraryError.invalidIdentifier }
+        _ = try load(id: id)
+        if enabled && platform == "tx" && isJiexiang(id: id) {
+            throw LibraryError.invalidIdentifier
+        }
+        var current = enabledPlatforms(id: id)
+        if enabled {
+            current.insert(platform)
+        } else {
+            current.remove(platform)
+        }
+        var overrides = platformOverrides
+        overrides[id.lowercased()] = current.sorted()
+        platformOverrides = overrides
+        // A checkbox can explicitly opt an imported script into playback.
+        // Other platforms remain disabled unless selected or previously approved.
+        if enabled && !isBundled(id: id) {
+            try approve(id: id)
+        }
+    }
+
     func approve(id: String) throws {
         _ = try load(id: id)
         guard !isBundled(id: id) else { return }
@@ -154,6 +203,9 @@ final class LXSourceLibrary {
         var ids = approvedIDs
         ids.remove(id.lowercased())
         UserDefaults.standard.set(Array(ids).sorted(), forKey: approvedKey)
+        var overrides = platformOverrides
+        overrides.removeValue(forKey: id.lowercased())
+        platformOverrides = overrides
         try FileManager.default.removeItem(at: scriptURL(for: id))
         let nameURL = directory.appendingPathComponent(id.lowercased()).appendingPathExtension("name")
         try? FileManager.default.removeItem(at: nameURL)
