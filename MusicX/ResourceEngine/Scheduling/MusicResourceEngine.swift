@@ -280,134 +280,108 @@ struct MusicResourceEngine {
         quality: MusicQuality,
         excludingProviderIDs: Set<String> = []
     ) async throws -> ResolvedMusicResource {
-        // Preserve native platform preference, then try imported LX scripts
-        // and finally cross-platform matched alternatives.
-        let providers: [(provider: any MusicResourceProvider, tier: Int, baseline: Int)]
+        // Native URLs, pyncmd, imported JS, and matched platforms compete.
+        // A failing or slow supplier must not block a faster working one.
+        let providers: [any MusicResourceProvider]
         switch song.source {
         case .qq:
             providers = [
-                (QQGDStudioAudioProvider(session: session), 0, 1_000),
-                (QQChkszAudioProvider(session: session), 1, 900),
-                (ImportedLXSourceProvider(excludedScriptIDs: excludingProviderIDs), 2, 200),
-                (CrossPlatformFallbackProvider(session: session), 3, 50)
+                QQGDStudioAudioProvider(session: session),
+                QQChkszAudioProvider(session: session),
+                ImportedLXSourceProvider(excludedScriptIDs: excludingProviderIDs),
+                CrossPlatformFallbackProvider(session: session)
             ]
         case .netease:
             providers = [
-                (NetEaseNativeAudioProvider(session: session), 0, 1_000),
-                (KumonePyncmdAudioSourceProvider(), 1, 100),
-                (ImportedLXSourceProvider(excludedScriptIDs: excludingProviderIDs), 2, 200),
-                (CrossPlatformFallbackProvider(session: session), 2, 50)
+                NetEaseNativeAudioProvider(session: session),
+                KumonePyncmdAudioSourceProvider(),
+                ImportedLXSourceProvider(excludedScriptIDs: excludingProviderIDs),
+                CrossPlatformFallbackProvider(session: session)
             ]
         default:
             providers = [
-                (MusicXLegacySupplierLibrary(session: session), 0, 100),
-                (ImportedLXSourceProvider(excludedScriptIDs: excludingProviderIDs), 1, 200)
+                MusicXLegacySupplierLibrary(session: session),
+                ImportedLXSourceProvider(excludedScriptIDs: excludingProviderIDs),
+                CrossPlatformFallbackProvider(session: session)
             ]
         }
 
-        var failures: [String] = []
-        for entry in providers {
-            let provider = entry.provider
-            try Task.checkCancellation()
-
-            if excludingProviderIDs.contains(provider.identifier) {
-                MusicSourceDiagnostics.shared.record(
-                    event: "resource-provider",
-                    source: song.source.rawValue,
-                    provider: provider.identifier,
-                    duration: 0,
-                    result: "skipped_after_playback_failure",
-                    detail: "AVPlayer rejected the previous stream from this provider"
-                )
-                failures.append("\(provider.displayName)：上一次播放失败，已跳过")
-                continue
+        return try await withThrowingTaskGroup(
+            of: (ResolvedMusicResource?, String?).self,
+            returning: ResolvedMusicResource.self
+        ) { group in
+            for provider in providers {
+                group.addTask {
+                    try Task.checkCancellation()
+                    if excludingProviderIDs.contains(provider.identifier) {
+                        return (nil, "\(provider.displayName)：上一次播放失败，已跳过")
+                    }
+                    guard ResourceProviderCircuitBreaker.shared.shouldAttempt(provider.identifier) else {
+                        return (nil, "\(provider.displayName)：暂时冷却")
+                    }
+                    let startedAt = Date()
+                    do {
+                        guard let resource = try await provider.resolve(song: song, quality: quality) else {
+                            ResourceProviderCircuitBreaker.shared.recordHealthy(provider.identifier)
+                            MusicSourceDiagnostics.shared.record(
+                                event: "resource-provider", source: song.source.rawValue,
+                                provider: provider.identifier,
+                                duration: Date().timeIntervalSince(startedAt), result: "no_match"
+                            )
+                            return (nil, "\(provider.displayName)：没有可用资源")
+                        }
+                        try Task.checkCancellation()
+                        guard Self.isValidStreamURL(resource.url) else {
+                            throw MusicSourceError.invalidResponse("供应商返回了无效播放地址")
+                        }
+                        let elapsed = Date().timeIntervalSince(startedAt)
+                        ResourceProviderCircuitBreaker.shared.recordHealthy(provider.identifier)
+                        ResourceProviderPerformance.shared.record(
+                            identifier: provider.identifier, succeeded: true, duration: elapsed
+                        )
+                        MusicSourceDiagnostics.shared.record(
+                            event: "resource-provider", source: song.source.rawValue,
+                            provider: resource.providerID, duration: elapsed,
+                            result: "url_returned_direct"
+                        )
+                        return (resource, nil)
+                    } catch {
+                        if Task.isCancelled || error is CancellationError
+                            || (error as? URLError)?.code == .cancelled {
+                            throw CancellationError()
+                        }
+                        let elapsed = Date().timeIntervalSince(startedAt)
+                        if Self.shouldTripCircuitBreaker(for: error) {
+                            ResourceProviderCircuitBreaker.shared.recordFailure(provider.identifier)
+                            ResourceProviderPerformance.shared.record(
+                                identifier: provider.identifier, succeeded: false, duration: elapsed
+                            )
+                        } else {
+                            ResourceProviderCircuitBreaker.shared.recordResourceFailure(provider.identifier)
+                        }
+                        MusicSourceDiagnostics.shared.record(
+                            event: "resource-provider", source: song.source.rawValue,
+                            provider: provider.identifier, duration: elapsed,
+                            result: "resource_unavailable", detail: error.localizedDescription
+                        )
+                        return (nil, "\(provider.displayName)：\(error.localizedDescription)")
+                    }
+                }
             }
-
-            guard ResourceProviderCircuitBreaker.shared.shouldAttempt(provider.identifier) else {
-                MusicSourceDiagnostics.shared.record(
-                    event: "resource-provider",
-                    source: song.source.rawValue,
-                    provider: provider.identifier,
-                    duration: 0,
-                    result: "circuit_open",
-                    detail: "供应商连续失败，冷却中"
-                )
-                failures.append("\(provider.displayName)：暂时冷却")
-                continue
+            var failures: [String] = []
+            while let (resource, failure) = try await group.next() {
+                if let resource {
+                    group.cancelAll()
+                    return resource
+                }
+                if let failure { failures.append(failure) }
             }
-
-            let startedAt = Date()
-            do {
-                guard let resource = try await provider.resolve(song: song, quality: quality) else {
-                    let elapsed = Date().timeIntervalSince(startedAt)
-                    ResourceProviderCircuitBreaker.shared.recordHealthy(provider.identifier)
-                    MusicSourceDiagnostics.shared.record(
-                        event: "resource-provider",
-                        source: song.source.rawValue,
-                        provider: provider.identifier,
-                        duration: elapsed,
-                        result: "no_match"
-                    )
-                    failures.append("\(provider.displayName)：没有可用资源")
-                    continue
-                }
-
-                try Task.checkCancellation()
-                guard Self.isValidStreamURL(resource.url) else {
-                    throw MusicSourceError.invalidResponse("供应商返回了无效播放地址")
-                }
-
-                let elapsed = Date().timeIntervalSince(startedAt)
-                ResourceProviderCircuitBreaker.shared.recordHealthy(provider.identifier)
-                ResourceProviderPerformance.shared.record(
-                    identifier: provider.identifier,
-                    succeeded: true,
-                    duration: elapsed
-                )
-                MusicSourceDiagnostics.shared.record(
-                    event: "resource-provider",
-                    source: song.source.rawValue,
-                    provider: resource.providerID,
-                    duration: elapsed,
-                    result: "url_returned_direct"
-                )
-                return resource
-            } catch {
-                if Task.isCancelled || error is CancellationError
-                    || (error as? URLError)?.code == .cancelled {
-                    throw CancellationError()
-                }
-
-                let elapsed = Date().timeIntervalSince(startedAt)
-                let providerLevelFailure = Self.shouldTripCircuitBreaker(for: error)
-                if providerLevelFailure {
-                    ResourceProviderCircuitBreaker.shared.recordFailure(provider.identifier)
-                    ResourceProviderPerformance.shared.record(
-                        identifier: provider.identifier,
-                        succeeded: false,
-                        duration: elapsed
-                    )
-                } else {
-                    ResourceProviderCircuitBreaker.shared.recordResourceFailure(provider.identifier)
-                }
-                MusicSourceDiagnostics.shared.record(
-                    event: "resource-provider",
-                    source: song.source.rawValue,
-                    provider: provider.identifier,
-                    duration: elapsed,
-                    result: providerLevelFailure ? "failed" : "resource_unavailable",
-                    detail: error.localizedDescription
-                )
-                failures.append("\(provider.displayName)：\(error.localizedDescription)")
-            }
+            throw MusicSourceError.noPlayableURL(
+                source: song.source,
+                details: failures.isEmpty ? "所有并发解析通道均未返回可用地址"
+                    : failures.joined(separator: "；")
+            )
         }
-
-        throw MusicSourceError.noPlayableURL(
-            source: song.source,
-            details: failures.isEmpty
-                ? "网易云原始地址及 pyncmd、酷狗、酷我均未返回可用地址"
-                : failures.joined(separator: "；")
-        )
     }
 
     /// HTTP 4xx responses from a stream URL are usually song-, region-, or
