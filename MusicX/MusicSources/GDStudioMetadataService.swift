@@ -29,10 +29,41 @@ struct GDStudioMetadataService {
     }
 
     func lyrics(for song: MusicSong) async throws -> (original: String, translated: String?)? {
-        guard let lyricID = song.lyricID, !lyricID.isEmpty else { return nil }
-        let cacheKey = "lyrics|\(song.source.rawValue)|\(lyricID)"
+        let lyricID = song.source == .qq ? song.sourceID : (song.lyricID ?? song.sourceID)
+        guard !lyricID.isEmpty else { return nil }
+        let cacheKey = "lyrics-v2|\(song.source.rawValue)|\(lyricID)"
         if let cached: CachedLyrics = await MusicCache.shared.value(for: cacheKey) {
             return (cached.original, cached.translated)
+        }
+        if song.source == .qq {
+            let started = Date()
+            do {
+                if let native = try await qqLyrics(songID: lyricID) {
+                    await MusicCache.shared.insert(
+                        CachedLyrics(original: native.original, translated: native.translated),
+                        for: cacheKey, ttl: 7 * 24 * 60 * 60
+                    )
+                    MusicSourceDiagnostics.shared.record(
+                        event: "lyrics", source: song.source.rawValue,
+                        provider: "qq-native-lyrics", duration: Date().timeIntervalSince(started),
+                        result: "success", detail: "song_id=\(lyricID)"
+                    )
+                    return native
+                }
+                MusicSourceDiagnostics.shared.record(
+                    event: "lyrics", source: song.source.rawValue,
+                    provider: "qq-native-lyrics", duration: Date().timeIntervalSince(started),
+                    result: "empty", detail: "song_id=\(lyricID)"
+                )
+            } catch {
+                if Task.isCancelled || error is CancellationError
+                    || (error as? URLError)?.code == .cancelled { throw CancellationError() }
+                MusicSourceDiagnostics.shared.record(
+                    event: "lyrics", source: song.source.rawValue,
+                    provider: "qq-native-lyrics", duration: Date().timeIntervalSince(started),
+                    result: "failed", detail: error.localizedDescription
+                )
+            }
         }
         if song.source == .netease {
             do {
@@ -71,6 +102,41 @@ struct GDStudioMetadataService {
         await MusicCache.shared.insert(CachedLyrics(original: original, translated: translated),
                                        for: cacheKey, ttl: 7 * 24 * 60 * 60)
         return (original, translated)
+    }
+
+    private func qqLyrics(songID: String) async throws -> (original: String, translated: String?)? {
+        var components = URLComponents(string: "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg")!
+        components.queryItems = [
+            URLQueryItem(name: songID.allSatisfy(\.isNumber) ? "songid" : "songmid", value: songID),
+            URLQueryItem(name: "format", value: "json"),
+            URLQueryItem(name: "nobase64", value: "1")
+        ]
+        var request = URLRequest(url: components.url!)
+        request.timeoutInterval = 8
+        request.setValue("https://y.qq.com/", forHTTPHeaderField: "Referer")
+        request.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+        let (data, response) = try await session.data(for: request)
+        try Task.checkCancellation()
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              (root["code"] as? Int) == 0 else {
+            throw MusicSourceError.invalidResponse("QQ 歌词接口响应异常")
+        }
+        func decode(_ value: Any?) -> String? {
+            guard var text = value as? String, !text.isEmpty else { return nil }
+            if !text.contains("["), let bytes = Data(base64Encoded: text),
+               let decoded = String(data: bytes, encoding: .utf8), decoded.contains("[") {
+                text = decoded
+            }
+            for (entity, literal) in [("&#10;", "\n"), ("&#13;", "\r"),
+                                      ("&#39;", "'"), ("&apos;", "'"), ("&quot;", "\""),
+                                      ("&lt;", "<"), ("&gt;", ">"), ("&amp;", "&")] {
+                text = text.replacingOccurrences(of: entity, with: literal)
+            }
+            return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : text
+        }
+        guard let original = decode(root["lyric"]) else { return nil }
+        return (original, decode(root["trans"]))
     }
 
     private func request(_ query: [URLQueryItem]) async throws -> Any {
