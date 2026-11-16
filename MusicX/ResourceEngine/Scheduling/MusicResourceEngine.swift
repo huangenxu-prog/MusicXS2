@@ -308,27 +308,35 @@ struct MusicResourceEngine {
         quality: MusicQuality,
         excludingProviderIDs: Set<String> = []
     ) async throws -> ResolvedMusicResource {
-        // Native URLs, pyncmd, imported JS, and matched platforms compete.
-        // A failing or slow supplier must not block a faster working one.
+        // First try the source's existing direct URL. If it is unavailable,
+        // race the dynamic imported-LX and matched-catalog fallback paths.
+        // Never wait for all fallback suppliers once a candidate is available.
+        let directProviders: [any MusicResourceProvider]
+        switch song.source {
+        case .netease:
+            directProviders = [NetEaseNativeAudioProvider(session: session)]
+        case .qq:
+            // These are existing direct-URL adapters, not official QQ APIs.
+            directProviders = [QQChkszAudioProvider(session: session)]
+        default:
+            directProviders = []
+        }
+        for provider in directProviders where !excludingProviderIDs.contains(provider.identifier) {
+            if let resource = try? await provider.resolve(song: song, quality: quality),
+               Self.isValidStreamURL(resource.url) {
+                return resource
+            }
+        }
+
         let providers: [any MusicResourceProvider]
         switch song.source {
-        case .qq:
-            // QQ's legacy direct URL services are unreliable and are not part
-            // of the 18-channel pool. Imported scripts and matched catalogs race.
-            providers = [
-                ImportedLXSourceProvider(excludedScriptIDs: excludingProviderIDs, excludedURLIDs: excludingProviderIDs),
-                CrossPlatformFallbackProvider(session: session, excludedURLIDs: excludingProviderIDs)
-            ]
         case .netease:
             providers = [
-                NetEaseNativeAudioProvider(session: session),
                 KumonePyncmdAudioSourceProvider(),
                 ImportedLXSourceProvider(excludedScriptIDs: excludingProviderIDs, excludedURLIDs: excludingProviderIDs),
                 CrossPlatformFallbackProvider(session: session, excludedURLIDs: excludingProviderIDs)
             ]
         default:
-            // Imported LX channels and the cross-platform catalog are the
-            // only paths here. Do not silently reintroduce legacy URL backends.
             providers = [
                 ImportedLXSourceProvider(excludedScriptIDs: excludingProviderIDs, excludedURLIDs: excludingProviderIDs),
                 CrossPlatformFallbackProvider(session: session, excludedURLIDs: excludingProviderIDs)
