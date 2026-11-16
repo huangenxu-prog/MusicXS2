@@ -1116,27 +1116,20 @@ struct MusicDiscoveryPage: View {
     }
 
     private func songArtwork(_ song: MusicSong, index: Int, isCurrent: Bool, size: CGFloat = 54) -> some View {
-        let palettes: [[Color]] = [
-            [Color(red: 0.28, green: 0.52, blue: 0.91), Color(red: 0.10, green: 0.20, blue: 0.43)],
-            [Color(red: 0.55, green: 0.36, blue: 0.84), Color(red: 0.22, green: 0.16, blue: 0.48)],
-            [Color(red: 0.12, green: 0.62, blue: 0.67), Color(red: 0.06, green: 0.25, blue: 0.42)],
-            [Color(red: 0.78, green: 0.43, blue: 0.30), Color(red: 0.35, green: 0.16, blue: 0.22)],
-            [Color(red: 0.72, green: 0.58, blue: 0.28), Color(red: 0.34, green: 0.24, blue: 0.13)],
-            [Color(red: 0.36, green: 0.60, blue: 0.57), Color(red: 0.13, green: 0.28, blue: 0.32)]
-        ]
-        let colors = palettes[index % palettes.count]
-        return ZStack {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing))
-            RadialGradient(colors: [.white.opacity(0.22), .clear], center: .topLeading, startRadius: 1, endRadius: size * 1.2)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            Image(systemName: isCurrent && isPlaying ? "waveform" : "music.note")
-                .font(.system(size: 19, weight: .medium))
-                .foregroundStyle(.white.opacity(0.94))
-        }
-        .frame(width: size, height: size)
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(.white.opacity(0.16), lineWidth: 0.8))
-        .accessibilityLabel("\(song.title) 封面占位图")
+        // Reuse the same real-cover-first component used by Home, Search and Library.
+        // A consistent themed placeholder appears only if the provider has no artwork.
+        SongArtworkView(song: song, tint: MusicXTheme.blue, size: size)
+            .overlay(alignment: .bottomTrailing) {
+                if isCurrent && isPlaying {
+                    Image(systemName: "waveform")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(4)
+                        .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 5))
+                        .padding(3)
+                }
+            }
+            .accessibilityLabel("\(song.title) 歌曲封面")
     }
 
     private var trackList: some View {
@@ -1155,15 +1148,18 @@ struct MusicDiscoveryPage: View {
                         onPlay(song)
                     } label: {
                         if isRecommendationPlaylistRoute {
-                            HStack(spacing: 18) {
-                                Text("\(index + 1)")
-                                    .font(.system(size: 15, weight: .medium, design: .rounded))
-                                    .foregroundStyle(isCurrent ? MusicXTheme.blue : MusicXTheme.muted)
-                                    .frame(width: 24, alignment: .center)
-                                Text(song.title)
-                                    .font(.system(size: 17, weight: .semibold))
-                                    .foregroundStyle(isCurrent ? MusicXTheme.blue : .white)
-                                    .lineLimit(1)
+                            HStack(spacing: 14) {
+                                songArtwork(song, index: index, isCurrent: isCurrent, size: 52)
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(song.title)
+                                        .font(.system(size: 17, weight: .semibold))
+                                        .foregroundStyle(isCurrent ? MusicXTheme.blue : .white)
+                                        .lineLimit(1)
+                                    Text(song.artist)
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(MusicXTheme.muted)
+                                        .lineLimit(1)
+                                }
                                 Spacer(minLength: 0)
                                 Image(systemName: "ellipsis")
                                     .font(.system(size: 17, weight: .semibold))
