@@ -141,6 +141,7 @@ private struct CrossPlatformFallbackProvider: MusicResourceProvider {
 private struct ImportedLXSourceProvider: MusicResourceProvider {
     let identifier = "imported-lx-scripts"
     let displayName = "已导入洛雪音源"
+    let excludedScriptIDs: Set<String>
 
     func resolve(song: MusicSong, quality: MusicQuality) async throws -> ResolvedMusicResource? {
         let platform: String
@@ -165,6 +166,7 @@ private struct ImportedLXSourceProvider: MusicResourceProvider {
         // are cancelled. Script failures never disable other imported sources.
         return try await withThrowingTaskGroup(of: ResolvedMusicResource?.self) { group in
             for (id, script) in scripts {
+                guard !excludedScriptIDs.contains("lx:\(id):\(platform)") else { continue }
                 group.addTask { @MainActor in
                     do {
                         try Task.checkCancellation()
@@ -238,15 +240,15 @@ struct MusicResourceEngine {
         quality: MusicQuality,
         excludingProviderIDs: Set<String> = []
     ) async throws -> ResolvedMusicResource {
-        // Resolve only through the selected platform. NetEase may use pyncmd
-        // when its native URL is unavailable; QQ stays on QQ providers.
+        // Preserve native platform preference, then try imported LX scripts
+        // and finally cross-platform matched alternatives.
         let providers: [(provider: any MusicResourceProvider, tier: Int, baseline: Int)]
         switch song.source {
         case .qq:
             providers = [
                 (QQGDStudioAudioProvider(session: session), 0, 1_000),
                 (QQChkszAudioProvider(session: session), 1, 900),
-                (ImportedLXSourceProvider(), 2, 200),
+                (ImportedLXSourceProvider(excludedScriptIDs: excludingProviderIDs), 2, 200),
                 (CrossPlatformFallbackProvider(session: session), 3, 50)
             ]
         case .netease:
