@@ -317,9 +317,10 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
                             // for this matched platform race as independent paths.
                             // The matched platform's ID is passed to its own JS.
                             let url: URL? = await withTaskGroup(of: URL?.self, returning: URL?.self) { paths in
-                                paths.addTask {
-                                    try? await resolveNative(song: candidate, quality: quality)
-                                }
+                                // Cross-platform fallback uses imported JS on the
+                                // matched catalog ID, plus NetEase native/pyncmd.
+                                // Do not reintroduce unreliable QQ direct-URL
+                                // services or other legacy native suppliers here.
                                 paths.addTask {
                                     try? await MusicResourceEngine(session: session)
                                         .resolveImportedLX(song: candidate, quality: quality)
