@@ -1128,19 +1128,33 @@ struct ContentView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("搜索音乐")
-                    Button {
-                        sourceAccessPhrase = ""
-                        isSourceAccessPromptPresented = true
+                    Menu {
+                        Button {
+                            sourceAccessPhrase = ""
+                            isSourceAccessPromptPresented = true
+                        } label: {
+                            Label("音源管理", systemImage: "puzzlepiece.extension")
+                        }
+                        Divider()
+                        Button {
+                            exportMusicBackup()
+                        } label: {
+                            Label("导出音乐收藏", systemImage: "square.and.arrow.up")
+                        }
+                        Button {
+                            isBackupImportPresented = true
+                        } label: {
+                            Label("恢复音乐收藏", systemImage: "square.and.arrow.down")
+                        }
                     } label: {
-                        Image(systemName: "puzzlepiece.extension")
-                            .font(.system(size: 19, weight: .medium))
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 21, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.92))
                             .frame(width: 44, height: 44)
                             .background(Color(red: 0.075, green: 0.09, blue: 0.17), in: Circle())
                             .overlay(Circle().stroke(Color(red: 0.19, green: 0.23, blue: 0.43), lineWidth: 1))
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("音源测试")
+                    .accessibilityLabel("更多选项")
                     .alert("嘘……这里是浅笑的秘密基地。", isPresented: $isSourceAccessPromptPresented) {
                         SecureField("输入暗号", text: $sourceAccessPhrase)
                             .textInputAutocapitalization(.never)
@@ -1171,26 +1185,6 @@ struct ContentView: View {
                         LXSourceTestPanel()
                             .preferredColorScheme(.dark)
                     }
-                    Menu {
-                        Button {
-                            exportMusicBackup()
-                        } label: {
-                            Label("导出音乐收藏", systemImage: "square.and.arrow.up")
-                        }
-                        Button {
-                            isBackupImportPresented = true
-                        } label: {
-                            Label("恢复音乐收藏", systemImage: "square.and.arrow.down")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.system(size: 21, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.92))
-                            .frame(width: 44, height: 44)
-                            .background(Color(red: 0.075, green: 0.09, blue: 0.17), in: Circle())
-                            .overlay(Circle().stroke(Color(red: 0.19, green: 0.23, blue: 0.43), lineWidth: 1))
-                    }
-                    .accessibilityLabel("音乐数据备份")
                 }
 
                 HStack(spacing: 8) {
