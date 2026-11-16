@@ -651,21 +651,17 @@ struct MusicDiscoveryPage: View {
                         onPlay(song)
                     } label: {
                         HStack(spacing: 14) {
-                            if isCurrent && isPlaying {
-                                Image(systemName: "waveform")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(MusicXTheme.blue)
-                                    .frame(width: 22)
-                            } else {
-                                Text("\(index + 1)")
-                                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                            SongArtworkView(song: song, tint: MusicXTheme.blue, size: 46)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(song.title)
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(isCurrent ? MusicXTheme.blue : .white)
+                                    .lineLimit(1)
+                                Text(song.artist)
+                                    .font(.system(size: 12))
                                     .foregroundStyle(MusicXTheme.muted)
-                                    .frame(width: 22)
+                                    .lineLimit(1)
                             }
-                            Text(song.title)
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(isCurrent ? MusicXTheme.blue : .white)
-                                .lineLimit(1)
                             Spacer(minLength: 8)
                             Image(systemName: "ellipsis")
                                 .font(.system(size: 16, weight: .semibold))
