@@ -64,7 +64,11 @@ struct LXSourceTestPanel: View {
                     Text("可导入多个音源，点击左侧圆圈切换当前测试音源。")
                         .font(.caption).foregroundStyle(.secondary)
                     Button("从文件导入 .js 音源") { isImporterPresented = true }
-                    Button("从网址导入在线 JS 音源") { isURLImporterPresented = true }
+                    Button("从网址导入在线 JS 音源") {
+                        // Do not reuse the last URL when opening a new import dialog.
+                        remoteScriptURL = ""
+                        isURLImporterPresented = true
+                    }
                 }
                 Section("多平台歌曲搜索与试听") {
                     Picker("平台", selection: $testPlatform) {
@@ -191,6 +195,7 @@ struct LXSourceTestPanel: View {
             reload()
             try getLibrary().select(id: imported.id)
             selectedID = imported.id
+            remoteScriptURL = ""
             message = "在线音源已导入：\(imported.filename)。请点击「检查」确认注册，再测试取链。"
         } catch {
             message = "在线音源导入失败：\(error.localizedDescription)"
