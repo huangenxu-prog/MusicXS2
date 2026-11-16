@@ -677,17 +677,28 @@ struct ContentView: View {
         GeometryReader { geometry in
             let tileWidth = max(0, (geometry.size.width - 56) / 3)
             ZStack(alignment: .top) {
+                MusicXTheme.background.ignoresSafeArea()
                 LinearGradient(
                     stops: [
-                        .init(color: Color(red: 0.10, green: 0.09, blue: 0.23), location: 0),
-                        .init(color: Color(red: 0.23, green: 0.14, blue: 0.38), location: 0.18),
-                        .init(color: MusicXTheme.background, location: 0.46),
+                        .init(color: Color(red: 0.15, green: 0.11, blue: 0.29), location: 0),
+                        .init(color: Color(red: 0.27, green: 0.15, blue: 0.40), location: 0.28),
                         .init(color: MusicXTheme.background, location: 1)
                     ],
                     startPoint: .top,
                     endPoint: .bottom
                 )
-                .ignoresSafeArea()
+                .frame(height: 540)
+                .frame(maxHeight: .infinity, alignment: .top)
+                .ignoresSafeArea(edges: .top)
+                RadialGradient(
+                    colors: [Color(red: 0.62, green: 0.27, blue: 0.55).opacity(0.52), .clear],
+                    center: .topTrailing,
+                    startRadius: 0,
+                    endRadius: 385
+                )
+                .frame(height: 510)
+                .frame(maxHeight: .infinity, alignment: .top)
+                .ignoresSafeArea(edges: .top)
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 0) {
                         allCollectionsHeader
@@ -721,16 +732,7 @@ struct ContentView: View {
 
     private var allCollectionsHeader: some View {
         ZStack(alignment: .topLeading) {
-            LinearGradient(
-                stops: [
-                    .init(color: Color(red: 0.09, green: 0.10, blue: 0.24), location: 0),
-                    .init(color: Color(red: 0.24, green: 0.15, blue: 0.39), location: 0.44),
-                    .init(color: Color(red: 0.50, green: 0.20, blue: 0.48), location: 0.74),
-                    .init(color: Color(red: 0.13, green: 0.10, blue: 0.26), location: 1)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            Color.clear
             .overlay(alignment: .bottom) {
                 // A subtle ambient wave, matching the violet MusicX home palette.
                 GeometryReader { proxy in
@@ -1330,8 +1332,9 @@ struct ContentView: View {
                             .foregroundStyle(MusicXTheme.muted)
                             .lineLimit(1).truncationMode(.tail)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: 175, alignment: .leading)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -1342,11 +1345,20 @@ struct ContentView: View {
     }
 
     private func songRowTime(_ song: AppSong) -> some View {
-        Text(song.onlineSong?.duration.flatMap { $0 > 0 && $0.isFinite ? playerTime($0) : nil } ?? "--:--")
-            .font(.system(size: 12, weight: .medium, design: .rounded))
-            .monospacedDigit()
-            .foregroundStyle(MusicXTheme.muted)
-            .frame(width: 43, alignment: .trailing)
+        HStack(spacing: 4) {
+            if currentSong?.id == song.id && playerStore.isPlaying {
+                Image(systemName: "waveform")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(MusicXTheme.blue)
+            }
+            if let duration = song.onlineSong?.duration, duration.isFinite, duration > 0 {
+                Text(playerTime(duration))
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(MusicXTheme.muted)
+            }
+        }
+        .frame(width: 65, alignment: .trailing)
     }
 
     private func songRowMenu(_ song: AppSong) -> some View {
@@ -1359,9 +1371,9 @@ struct ContentView: View {
             }
         } label: {
             Image(systemName: "ellipsis")
-                .font(.system(size: 18))
-                .foregroundStyle(MusicXTheme.muted)
-                .frame(width: 36, height: 42)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(MusicXTheme.muted.opacity(0.8))
+                .frame(width: 34, height: 42)
                 .contentShape(Rectangle())
         }
         .accessibilityLabel("更多操作")
@@ -1402,8 +1414,9 @@ struct ContentView: View {
                             }
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: 175, alignment: .leading)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

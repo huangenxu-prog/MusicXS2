@@ -637,19 +637,28 @@ struct MusicDiscoveryPage: View {
         }
     }
 
-    private func trackDuration(_ song: MusicSong) -> String {
-        guard let duration = song.duration, duration.isFinite, duration > 0 else { return "--:--" }
+    private func trackDuration(_ song: MusicSong) -> String? {
+        guard let duration = song.duration, duration.isFinite, duration > 0 else { return nil }
         let seconds = Int(duration.rounded())
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 
-    private func trackTrailing(_ song: MusicSong) -> some View {
-        HStack(spacing: 6) {
-            Text(trackDuration(song))
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(MusicXTheme.muted)
-                .frame(width: 42, alignment: .trailing)
+    private func trackTrailing(_ song: MusicSong, isCurrent: Bool) -> some View {
+        HStack(spacing: 4) {
+            HStack(spacing: 4) {
+                if isCurrent && isPlaying {
+                    Image(systemName: "waveform")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(MusicXTheme.blue)
+                }
+                if let duration = trackDuration(song) {
+                    Text(duration)
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(MusicXTheme.muted)
+                }
+            }
+            .frame(width: 65, alignment: .trailing)
             Menu {
                 Button {
                     onToggleFavorite(song)
@@ -659,9 +668,9 @@ struct MusicDiscoveryPage: View {
                 }
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.system(size: 19, weight: .medium))
-                    .foregroundStyle(MusicXTheme.muted)
-                    .frame(width: 38, height: 44)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(MusicXTheme.muted.opacity(0.8))
+                    .frame(width: 34, height: 44)
                     .contentShape(Rectangle())
             }
             .accessibilityLabel("更多操作")
@@ -690,13 +699,15 @@ struct MusicDiscoveryPage: View {
                                     .font(.system(size: 16, weight: .semibold))
                                     .foregroundStyle(isCurrent ? MusicXTheme.blue : .white)
                                     .lineLimit(1)
+                                    .truncationMode(.tail)
                                 Text(song.artist)
                                     .font(.system(size: 12))
                                     .foregroundStyle(MusicXTheme.muted)
                                     .lineLimit(1)
+                                    .truncationMode(.tail)
                             }
                             Spacer(minLength: 4)
-                            Color.clear.frame(width: 88, height: 1)
+                            Color.clear.frame(width: 103, height: 1)
                         }
                         .padding(.horizontal, 16)
                         .frame(height: 76)
@@ -712,7 +723,7 @@ struct MusicDiscoveryPage: View {
                     }
                     .buttonStyle(.plain)
                     .overlay(alignment: .trailing) {
-                        trackTrailing(song).padding(.trailing, 13)
+                        trackTrailing(song, isCurrent: isCurrent).padding(.trailing, 13)
                     }
                 }
             }
@@ -1146,19 +1157,7 @@ struct MusicDiscoveryPage: View {
     }
 
     private func songArtwork(_ song: MusicSong, index: Int, isCurrent: Bool, size: CGFloat = 54) -> some View {
-        // Reuse the same real-cover-first component used by Home, Search and Library.
-        // A consistent themed placeholder appears only if the provider has no artwork.
         SongArtworkView(song: song, tint: MusicXTheme.blue, size: size)
-            .overlay(alignment: .bottomTrailing) {
-                if isCurrent && isPlaying {
-                    Image(systemName: "waveform")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(4)
-                        .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 5))
-                        .padding(3)
-                }
-            }
             .accessibilityLabel("\(song.title) 歌曲封面")
     }
 
@@ -1184,14 +1183,14 @@ struct MusicDiscoveryPage: View {
                                     Text(song.title)
                                         .font(.system(size: 17, weight: .semibold))
                                         .foregroundStyle(isCurrent ? MusicXTheme.blue : .white)
-                                        .lineLimit(1)
+                                        .lineLimit(1).truncationMode(.tail)
                                     Text(song.artist)
                                         .font(.system(size: 12))
                                         .foregroundStyle(MusicXTheme.muted)
-                                        .lineLimit(1)
+                                        .lineLimit(1).truncationMode(.tail)
                                 }
                                 Spacer(minLength: 4)
-                                Color.clear.frame(width: 88, height: 1)
+                                Color.clear.frame(width: 103, height: 1)
                             }
                             .padding(.horizontal, 18)
                             .frame(minHeight: 88)
@@ -1213,14 +1212,14 @@ struct MusicDiscoveryPage: View {
                                     Text(song.title)
                                         .font(.system(size: isRecommendationRoute ? 17 : 15, weight: .semibold))
                                         .foregroundStyle(isCurrent ? MusicXTheme.blue : .white)
-                                        .lineLimit(1)
+                                        .lineLimit(1).truncationMode(.tail)
                                     Text(song.artist)
                                         .font(.system(size: isRecommendationRoute ? 14 : 12))
                                         .foregroundStyle(isCurrent ? .white.opacity(0.78) : MusicXTheme.muted)
-                                        .lineLimit(1)
+                                        .lineLimit(1).truncationMode(.tail)
                                 }
                                 Spacer(minLength: 4)
-                                Color.clear.frame(width: 88, height: 1)
+                                Color.clear.frame(width: 103, height: 1)
                             }
                             .padding(.horizontal, isRecommendationRoute ? 0 : 12)
                             .padding(.vertical, isRecommendationRoute ? 8 : 10)
@@ -1242,7 +1241,7 @@ struct MusicDiscoveryPage: View {
                     }
                     .buttonStyle(.plain)
                     .overlay(alignment: .trailing) {
-                        trackTrailing(song).padding(.trailing, isRecommendationPlaylistRoute ? 16 : (isRecommendationRoute ? 0 : 12))
+                        trackTrailing(song, isCurrent: isCurrent).padding(.trailing, isRecommendationPlaylistRoute ? 16 : (isRecommendationRoute ? 0 : 12))
                     }
                     if isRecommendationRoute && index < songs.count - 1 {
                         Rectangle().fill(.white.opacity(0.10)).frame(height: 0.7)
