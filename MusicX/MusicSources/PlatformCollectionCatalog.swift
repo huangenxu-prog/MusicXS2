@@ -149,6 +149,72 @@ struct PlatformCollectionCatalog {
         return combined
     }
 
+
+    /// Import a user-shared QQ playlist. Never infer its contents from search
+    /// results: the exact shared playlist ID is used for both metadata and songs.
+    func importQQPlaylist(shareText: String) async throws -> (playlist: MusicPlaylist, songs: [MusicSong]) {
+        let text = shareText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let link = text.split(whereSeparator: { $0.isWhitespace }).first(where: { $0.hasPrefix("https://") || $0.hasPrefix("http://") }),
+              let components = URLComponents(string: String(link)),
+              let host = components.host?.lowercased(),
+              host == "qq.com" || host.hasSuffix(".qq.com") else {
+            throw MusicSourceError.invalidResponse("请粘贴 QQ 音乐的歌单分享链接")
+        }
+        let queryID = components.queryItems?.first(where: { ["id", "disstid"].contains($0.name.lowercased()) })?.value
+        let lastPath = components.path.split(separator: "/").last.map(String.init)
+        let playlistID = queryID ?? (components.path.contains("/playlist/") ? lastPath : nil)
+        guard let playlistID, !playlistID.isEmpty, playlistID.allSatisfy(\.isNumber),
+              let numericID = Int(playlistID), numericID > 0 else {
+            throw MusicSourceError.invalidResponse("无法从 QQ 音乐链接识别歌单编号")
+        }
+
+        let body: [String: Any] = [
+            "req_0": [
+                "module": "music.srfDissInfo.aiDissInfo",
+                "method": "uniform_get_Dissinfo",
+                "param": ["disstid": numericID, "song_begin": 0, "song_num": 50]
+            ],
+            "comm": ["uin": "0", "format": "json", "ct": 24, "cv": 0]
+        ]
+        var request = URLRequest(url: URL(string: "https://u.y.qq.com/cgi-bin/musicu.fcg")!)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 15
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("https://y.qq.com/", forHTTPHeaderField: "Referer")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let root = try await json(for: request)
+        let envelope = root["req_0"] as? [String: Any] ?? [:]
+        let data = envelope["data"] as? [String: Any] ?? [:]
+        let dirinfo = data["dirinfo"] as? [String: Any] ?? [:]
+        let metadata = data["dissinfo"] as? [String: Any] ?? [:]
+        func firstNonEmpty(_ values: [Any?]) -> String? {
+            values.compactMap { $0 as? String }.first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        }
+        let title = firstNonEmpty([
+            dirinfo["title"], dirinfo["dissname"], data["dissname"],
+            metadata["title"], metadata["dissname"]
+        ]) ?? "QQ 歌单 \(playlistID)"
+        let cover = firstNonEmpty([
+            dirinfo["picurl"], dirinfo["logo"], dirinfo["cover"],
+            data["logo"], data["picurl"], metadata["logo"]
+        ])
+        let rawCount = dirinfo["songnum"] ?? dirinfo["song_num"] ?? data["total_song_num"] ?? data["songnum"]
+        let declaredCount: Int? = (rawCount as? Int) ?? (rawCount as? NSNumber)?.intValue ?? (rawCount as? String).flatMap(Int.init)
+        // An explicit upper bound avoids unbounded requests for malformed
+        // server responses. A future background sync can page very large lists.
+        let maxImportCount = 5000
+        let requestedCount = min(max(declaredCount ?? 1000, 1), maxImportCount)
+        let entry = PlatformCollection(provider: .qq, sourceID: playlistID, name: title,
+                                       artworkURL: cover.flatMap { URL(string: $0.replacingOccurrences(of: "http://", with: "https://")) })
+        let tracks = try await tracks(for: entry, count: requestedCount)
+        try Task.checkCancellation()
+        let playlist = MusicPlaylist(source: .qq, sourceID: playlistID,
+                                     name: title, creator: nil, description: nil,
+                                     artworkURL: entry.artworkURL, trackCount: tracks.count,
+                                     provenance: .platformRecommended)
+        return (playlist, tracks)
+    }
+
     func tracks(for collection: PlatformCollection, count: Int = 50) async throws -> [MusicSong] {
         guard count > 0 else { return [] }
         switch collection.provider {

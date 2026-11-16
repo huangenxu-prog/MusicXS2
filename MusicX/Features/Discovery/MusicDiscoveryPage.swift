@@ -26,6 +26,14 @@ enum MusicDiscoveryRoute: Identifiable {
     }
 }
 
+/// Local snapshot keeps imported song order and IDs independent of later
+/// playlist changes, platform availability, and audio-resolution providers.
+private struct ImportedPlaylistSnapshot: Codable, Identifiable {
+    let playlist: MusicPlaylist
+    let songs: [MusicSong]
+    var id: String { playlist.id }
+}
+
 private struct PlaylistCardItem {
     let title: String
     let subtitle: String
@@ -77,6 +85,17 @@ struct MusicDiscoveryPage: View {
     @State private var selectedRecommendationTab: RecommendationTab = .daily
     @State private var recommendationSongCache: [RecommendationTab: [MusicSong]] = [:]
     @State private var selectedPersonalTab = 0
+    @AppStorage("musicx.importedPlaylists.v1") private var importedPlaylistsJSON = "[]"
+    @State private var isQQImportPresented = false
+    @State private var qqImportLink = ""
+    @State private var qqImportPreview: ImportedPlaylistSnapshot?
+    @State private var qqImportError: String?
+    @State private var isQQImportLoading = false
+
+    private var importedPlaylists: [ImportedPlaylistSnapshot] {
+        guard let data = importedPlaylistsJSON.data(using: .utf8) else { return [] }
+        return (try? JSONDecoder().decode([ImportedPlaylistSnapshot].self, from: data)) ?? []
+    }
     private var selectedChart: String {
         if let selectedChartOverride { return selectedChartOverride }
         if case .chart(let name) = route { return name }
@@ -222,7 +241,7 @@ struct MusicDiscoveryPage: View {
                         } else if case .albums = route {
                             albumGrid
                         } else if case .featuredPick = route, selectedPersonalTab == 1 {
-                            myPlaylistsEmptyState
+                            importedPlaylistGrid
                         } else if case .featuredPick = route, songs.isEmpty {
                             favoritesEmptyState
                         } else {
@@ -265,6 +284,10 @@ struct MusicDiscoveryPage: View {
         }
         .onChange(of: favoriteTracks.map(\.id)) { _, _ in
             if case .featuredPick = route { songs = favoriteTracks }
+        }
+        .sheet(isPresented: $isQQImportPresented) {
+            qqImportSheet
+                .preferredColorScheme(.dark)
         }
         .alert("暂未找到匹配歌单", isPresented: $isPlaylistUnavailableAlertPresented) {
             Button("知道了", role: .cancel) {}
@@ -647,19 +670,200 @@ struct MusicDiscoveryPage: View {
     }
 
     private var favoriteCategoryTabs: some View {
-        HStack(spacing: 10) {
-            ForEach(0..<2, id: \.self) { index in
-                Button { selectedPersonalTab = index } label: {
-                    Text(index == 0 ? "喜欢的歌曲" : "我的歌单")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(selectedPersonalTab == index ? Color(red: 0.10, green: 0.10, blue: 0.24) : .white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 42)
-                        .background(selectedPersonalTab == index ? Color(red: 0.89, green: 0.88, blue: 0.98) : Color.white.opacity(0.05), in: Capsule())
-                        .overlay(Capsule().stroke(.white.opacity(0.13), lineWidth: 1))
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                ForEach(0..<2, id: \.self) { index in
+                    Button { selectedPersonalTab = index } label: {
+                        Text(index == 0 ? "喜欢的歌曲" : "我的歌单")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(selectedPersonalTab == index ? Color(red: 0.10, green: 0.10, blue: 0.24) : .white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 42)
+                            .background(selectedPersonalTab == index ? Color(red: 0.89, green: 0.88, blue: 0.98) : Color.white.opacity(0.05), in: Capsule())
+                            .overlay(Capsule().stroke(.white.opacity(0.13), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
+            if selectedPersonalTab == 1 {
+                HStack {
+                    Text("共 \(importedPlaylists.count) 个歌单")
+                        .font(.system(size: 13))
+                        .foregroundStyle(MusicXTheme.muted)
+                    Spacer()
+                    Button {
+                        qqImportLink = ""
+                        qqImportPreview = nil
+                        qqImportError = nil
+                        isQQImportPresented = true
+                    } label: {
+                        Label("导入歌单", systemImage: "plus")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Color(red: 0.83, green: 0.72, blue: 0.98))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var importedPlaylistGrid: some View {
+        if importedPlaylists.isEmpty {
+            myPlaylistsEmptyState
+        } else {
+            let width = max((UIScreen.main.bounds.width - 44) / 2, 0)
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12),
+                                GridItem(.flexible(), spacing: 12)], spacing: 18) {
+                ForEach(importedPlaylists) { item in
+                    Button { onOpenPlaylist(item.playlist) } label: {
+                        VStack(alignment: .leading, spacing: 7) {
+                            Group {
+                                if let cover = item.playlist.artworkURL {
+                                    AsyncImage(url: cover) { phase in
+                                        if let image = phase.image {
+                                            image.resizable().scaledToFill()
+                                        } else {
+                                            importedPlaylistPlaceholder
+                                        }
+                                    }
+                                } else {
+                                    importedPlaylistPlaceholder
+                                }
+                            }
+                            .frame(width: width, height: width)
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            Text(item.playlist.name)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+                            Text("QQ 音乐 · \(item.songs.count) 首")
+                                .font(.system(size: 12))
+                                .foregroundStyle(MusicXTheme.muted)
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var importedPlaylistPlaceholder: some View {
+        ZStack {
+            LinearGradient(colors: [Color(red: 0.50, green: 0.31, blue: 0.74),
+                                    Color(red: 0.17, green: 0.15, blue: 0.35)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            Image(systemName: "music.note.list")
+                .font(.system(size: 31))
+                .foregroundStyle(.white.opacity(0.78))
+        }
+    }
+
+    private var qqImportSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    Text("粘贴 QQ 音乐歌单分享链接")
+                        .font(.system(size: 15))
+                        .foregroundStyle(MusicXTheme.muted)
+                    TextField("https://y.qq.com/...", text: $qqImportLink, axis: .vertical)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .lineLimit(2...4)
+                        .padding(13)
+                        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                    Button {
+                        Task { await previewQQImport() }
+                    } label: {
+                        HStack(spacing: 9) {
+                            if isQQImportLoading { ProgressView().tint(.white) }
+                            Text("解析 QQ 歌单")
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 46)
+                        .background(Color(red: 0.39, green: 0.28, blue: 0.72), in: Capsule())
+                        .foregroundStyle(.white)
+                    }
+                    .disabled(isQQImportLoading || qqImportLink.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    if let error = qqImportError {
+                        Text(error).font(.system(size: 13)).foregroundStyle(Color(red: 1, green: 0.60, blue: 0.64))
+                    }
+                    if let preview = qqImportPreview {
+                        HStack(spacing: 12) {
+                            AsyncImage(url: preview.playlist.artworkURL) { phase in
+                                if let image = phase.image {
+                                    image.resizable().scaledToFill()
+                                } else {
+                                    importedPlaylistPlaceholder
+                                }
+                            }
+                            .frame(width: 76, height: 76)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(preview.playlist.name)
+                                    .font(.system(size: 17, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                Text("QQ 音乐 · \(preview.songs.count) 首")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(MusicXTheme.muted)
+                            }
+                        }
+                        Button {
+                            saveQQImport(preview)
+                        } label: {
+                            Text(importedPlaylists.contains(where: { $0.id == preview.id }) ? "更新已导入歌单" : "保存到我的歌单")
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 46)
+                                .background(Color(red: 0.90, green: 0.90, blue: 0.98), in: Capsule())
+                                .foregroundStyle(Color(red: 0.09, green: 0.08, blue: 0.20))
+                        }
+                    }
+                }
+                .padding(20)
+            }
+            .background(Color(red: 0.06, green: 0.07, blue: 0.15))
+            .navigationTitle("导入 QQ 歌单")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("关闭") { isQQImportPresented = false }
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func previewQQImport() async {
+        isQQImportLoading = true
+        qqImportPreview = nil
+        qqImportError = nil
+        defer { isQQImportLoading = false }
+        do {
+            let result = try await PlatformCollectionCatalog().importQQPlaylist(shareText: qqImportLink)
+            qqImportPreview = ImportedPlaylistSnapshot(playlist: result.playlist, songs: result.songs)
+        } catch {
+            qqImportError = "解析失败：\(error.localizedDescription)"
+        }
+    }
+
+    private func saveQQImport(_ newItem: ImportedPlaylistSnapshot) {
+        var items = importedPlaylists
+        if let index = items.firstIndex(where: { $0.id == newItem.id }) {
+            items[index] = newItem
+        } else {
+            items.insert(newItem, at: 0)
+        }
+        do {
+            let data = try JSONEncoder().encode(items)
+            guard let value = String(data: data, encoding: .utf8) else {
+                throw MusicSourceError.invalidResponse("歌单数据编码失败")
+            }
+            importedPlaylistsJSON = value
+            isQQImportPresented = false
+        } catch {
+            qqImportError = "保存失败：\(error.localizedDescription)"
         }
     }
 
@@ -1577,6 +1781,10 @@ struct MusicDiscoveryPage: View {
             case .playlist(let name):
                 result = try await catalog.playlistTracks(keyword: name, count: 50)
             case .playlistByID(let playlist):
+                if let imported = importedPlaylists.first(where: { $0.id == playlist.id }) {
+                    result = imported.songs
+                    break
+                }
                 do {
                     result = try await catalog.playlistTracks(
                         playlistID: playlist.sourceID,
