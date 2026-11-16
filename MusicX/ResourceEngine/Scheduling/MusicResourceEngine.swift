@@ -255,13 +255,13 @@ struct MusicResourceEngine {
             providers = [
                 (NetEaseNativeAudioProvider(session: session), 0, 1_000),
                 (KumonePyncmdAudioSourceProvider(), 1, 100),
-                (ImportedLXSourceProvider(), 2, 200),
+                (ImportedLXSourceProvider(excludedScriptIDs: excludingProviderIDs), 2, 200),
                 (CrossPlatformFallbackProvider(session: session), 2, 50)
             ]
         default:
             providers = [
                 (MusicXLegacySupplierLibrary(session: session), 0, 100),
-                (ImportedLXSourceProvider(), 1, 200)
+                (ImportedLXSourceProvider(excludedScriptIDs: excludingProviderIDs), 1, 200)
             ]
         }
 
