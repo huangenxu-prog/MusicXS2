@@ -664,7 +664,6 @@ struct MusicDiscoveryPage: View {
                     .frame(width: 38, height: 44)
                     .contentShape(Rectangle())
             }
-            .menuStyle(.borderlessButton)
             .accessibilityLabel("更多操作")
         }
     }
