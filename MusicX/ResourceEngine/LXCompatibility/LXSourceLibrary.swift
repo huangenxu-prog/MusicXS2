@@ -116,12 +116,12 @@ final class LXSourceLibrary {
     /// The source header convention is: * @name Human-readable source name
     private static func displayFilename(script: String, fallback: String) -> String {
         let header = String(script.prefix(4096))
-        let pattern = #"(?m)^\\s*\\*\\s*@name\\s+([^\\r\\n]+)"#
+        let pattern = #"(?m)^\s*\*\s*@name\s+([^\r\n]+)"#
         if let range = header.range(of: pattern, options: .regularExpression) {
             let line = String(header[range])
             if let marker = line.range(of: "@name") {
                 let name = line[marker.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
-                    .replacingOccurrences(of: #"\\s*\\*/\\s*$"#, with: "", options: .regularExpression)
+                    .replacingOccurrences(of: #"\s*\*/\s*$"#, with: "", options: .regularExpression)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 if !name.isEmpty { return String(name.prefix(80)) }
             }
