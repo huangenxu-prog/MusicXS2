@@ -44,6 +44,8 @@ struct MusicDiscoveryPage: View {
     let onSelectMainTab: (String) -> Void
     let onClose: (Bool) -> Void
     let onPlay: (MusicSong) -> Void
+    let isFavorite: (MusicSong) -> Bool
+    let onToggleFavorite: (MusicSong) -> Void
     let currentSong: MusicSong?
     let isPlaying: Bool
     let onTogglePlayback: () -> Void
@@ -635,6 +637,20 @@ struct MusicDiscoveryPage: View {
         }
     }
 
+    private func favoriteControl(for song: MusicSong) -> some View {
+        Button {
+            onToggleFavorite(song)
+        } label: {
+            Image(systemName: isFavorite(song) ? "heart.fill" : "heart")
+                .font(.system(size: 21, weight: .medium))
+                .foregroundStyle(isFavorite(song) ? Color(red: 1, green: 0.42, blue: 0.61) : MusicXTheme.muted)
+                .frame(width: 44, height: 48)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isFavorite(song) ? "取消收藏" : "收藏歌曲")
+    }
+
     private var musicCategoryTrackList: some View {
         VStack(spacing: 0) {
             if isLoading {
@@ -663,9 +679,7 @@ struct MusicDiscoveryPage: View {
                                     .lineLimit(1)
                             }
                             Spacer(minLength: 8)
-                            Image(systemName: "ellipsis")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(MusicXTheme.muted)
+                            Color.clear.frame(width: 44, height: 1)
                         }
                         .padding(.horizontal, 16)
                         .frame(height: 76)
@@ -680,6 +694,9 @@ struct MusicDiscoveryPage: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    .overlay(alignment: .trailing) {
+                        favoriteControl(for: song).padding(.trailing, 14)
+                    }
                 }
             }
         }
@@ -1157,9 +1174,7 @@ struct MusicDiscoveryPage: View {
                                         .lineLimit(1)
                                 }
                                 Spacer(minLength: 0)
-                                Image(systemName: "ellipsis")
-                                    .font(.system(size: 17, weight: .semibold))
-                                    .foregroundStyle(MusicXTheme.muted)
+                                Color.clear.frame(width: 44, height: 1)
                             }
                             .padding(.horizontal, 18)
                             .frame(minHeight: 88)
@@ -1196,7 +1211,7 @@ struct MusicDiscoveryPage: View {
                                     if isCurrent && isPlaying {
                                         Image(systemName: "waveform").font(.system(size: 13, weight: .semibold)).foregroundStyle(MusicXTheme.blue)
                                     }
-                                    Image(systemName: isChartRoute ? "ellipsis" : "chevron.right").font(.system(size: 16, weight: .semibold)).foregroundStyle(MusicXTheme.muted.opacity(0.82))
+                                    Color.clear.frame(width: 44, height: 1)
                                 }
                             }
                             .padding(.horizontal, isRecommendationRoute ? 0 : 12)
@@ -1218,6 +1233,9 @@ struct MusicDiscoveryPage: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    .overlay(alignment: .trailing) {
+                        favoriteControl(for: song).padding(.trailing, isRecommendationPlaylistRoute ? 16 : 8)
+                    }
                     if isRecommendationRoute && index < songs.count - 1 {
                         Rectangle().fill(.white.opacity(0.10)).frame(height: 0.7)
                             .padding(.leading, 70)
