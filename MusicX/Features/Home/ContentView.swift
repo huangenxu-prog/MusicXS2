@@ -616,15 +616,6 @@ struct ContentView: View {
         }
     }
 
-    private var officialCollectionsGridHeight: CGFloat {
-        let columns = 3
-        let rows = (min(homeOfficialCollections.count, 9) + columns - 1) / columns
-        let cellWidth = max(0, (UIScreen.main.bounds.width - 28 - 24) / CGFloat(columns))
-        let rowSpacing = CGFloat(max(0, rows - 1)) * 14
-        let rowContentHeight = CGFloat(rows) * 44
-        return max(0, cellWidth * CGFloat(rows) + rowSpacing + rowContentHeight)
-    }
-
     @ViewBuilder
     private var featuredCollectionSection: some View {
         // Keep the section out of the interface until real platform playlists arrive.
@@ -644,22 +635,20 @@ struct ContentView: View {
                 }
                 .padding(.horizontal, 14)
 
-                GeometryReader { proxy in
-                    let gap: CGFloat = 12
-                    let width = max(0, (proxy.size.width - 28 - gap * 2) / 3)
-                    LazyVGrid(
-                        columns: Array(repeating: GridItem(.flexible(), spacing: gap, alignment: .top), count: 3),
-                        alignment: .center,
-                        spacing: 14
-                    ) {
-                        ForEach(Array(homeOfficialCollections.prefix(9))) { collection in
-                            officialCollectionTile(collection: collection, width: width)
-                        }
+                // Use the grid's intrinsic height rather than a fixed GeometryReader
+                // allocation, which left an empty block below the third row.
+                let gap: CGFloat = 12
+                let width = max(0, (UIScreen.main.bounds.width - 28 - gap * 2) / 3)
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.flexible(), spacing: gap, alignment: .top), count: 3),
+                    alignment: .center,
+                    spacing: 14
+                ) {
+                    ForEach(Array(homeOfficialCollections.prefix(9))) { collection in
+                        officialCollectionTile(collection: collection, width: width)
                     }
-                    .padding(.horizontal, 14)
-                    .frame(maxWidth: .infinity, alignment: .top)
                 }
-                .frame(height: officialCollectionsGridHeight)
+                .padding(.horizontal, 14)
             }
         }
     }
