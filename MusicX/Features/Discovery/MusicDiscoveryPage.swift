@@ -652,7 +652,7 @@ struct MusicDiscoveryPage: View {
     }
 
     private var musicCategoryTrackList: some View {
-        VStack(spacing: 0) {
+        LazyVStack(spacing: 0) {
             if isLoading {
                 ProgressView().tint(MusicXTheme.blue).frame(maxWidth: .infinity).padding(.vertical, 28)
             } else if let errorMessage, songs.isEmpty {
@@ -1146,7 +1146,7 @@ struct MusicDiscoveryPage: View {
     }
 
     private var trackList: some View {
-        VStack(spacing: 2) {
+        LazyVStack(spacing: 2) {
             if isLoading {
                 ProgressView().tint(MusicXTheme.blue).frame(maxWidth: .infinity).padding(.vertical, 28)
             } else if let errorMessage, songs.isEmpty {
