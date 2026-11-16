@@ -2,10 +2,32 @@ import SwiftUI
 import AVFoundation
 import UniformTypeIdentifiers
 
+private struct LXSourceBackupDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+    static var writableContentTypes: [UTType] { [.json] }
+    var contents: Data
+
+    init(contents: Data) { self.contents = contents }
+
+    init(configuration: ReadConfiguration) throws {
+        guard let data = configuration.file.regularFileContents else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        contents = data
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: contents)
+    }
+}
+
 /// Temporary test-only UI. Does not affect the normal music resource scheduler.
 struct LXSourceTestPanel: View {
     @Environment(\.dismiss) private var dismiss
     @State private var isImporterPresented = false
+    @State private var isSourceBackupExporterPresented = false
+    @State private var isSourceBackupImporterPresented = false
+    @State private var sourceBackupDocument: LXSourceBackupDocument?
     @State private var isURLImporterPresented = false
     @State private var remoteScriptURL = ""
     @State private var isImportingRemote = false
@@ -57,7 +79,7 @@ struct LXSourceTestPanel: View {
                                         VStack(alignment: .leading, spacing: 4) {
                                             Text((try? getLibrary().filename(id: id)) ?? id)
                                                 .lineLimit(1)
-                                            Text("已启用 \\(platformSelections[id]?.count ?? 0) / 4 个平台")
+                                            Text("已启用 \(platformSelections[id]?.count ?? 0) / 4 个平台")
                                                 .font(.caption2).foregroundStyle(.secondary)
                                         }
                                         Spacer(minLength: 4)
@@ -94,6 +116,10 @@ struct LXSourceTestPanel: View {
                 Section {
                     Text("点击音源名称展开四个平台，勾选启用、取消勾选停用；展开后也会将该音源设为当前测试对象。")
                         .font(.caption).foregroundStyle(.secondary)
+                    Button("备份音源与启用设置") { exportSourceBackup() }
+                    Button("从备份恢复音源与设置") { isSourceBackupImporterPresented = true }
+                    Text("备份包含导入的 JS 源码及平台勾选状态，请妥善保存；恢复不会删除现有音源。")
+                        .font(.caption2).foregroundStyle(.secondary)
                     Button("从文件导入 .js 音源") { isImporterPresented = true }
                     Button("从网址导入在线 JS 音源") {
                         // Do not reuse the last URL when opening a new import dialog.
@@ -172,6 +198,35 @@ struct LXSourceTestPanel: View {
                     message = "已导入 \(imported.count) 个音源。\(failed.isEmpty ? "" : "失败：\(failed.joined(separator: "；"))")"
                 } catch { message = "导入失败：\(error.localizedDescription)" }
             }
+            .fileExporter(
+                isPresented: $isSourceBackupExporterPresented,
+                document: sourceBackupDocument,
+                contentType: .json,
+                defaultFilename: "MusicXS2-LXSource-Backup"
+            ) { result in
+                if case .failure(let error) = result {
+                    message = "音源备份导出失败：\(error.localizedDescription)"
+                } else {
+                    message = "音源备份已导出，请妥善保存 JSON 文件。"
+                }
+                sourceBackupDocument = nil
+            }
+            .fileImporter(
+                isPresented: $isSourceBackupImporterPresented,
+                allowedContentTypes: [.json]
+            ) { result in
+                do {
+                    let url = try result.get()
+                    let granted = url.startAccessingSecurityScopedResource()
+                    defer { if granted { url.stopAccessingSecurityScopedResource() } }
+                    let data = try Data(contentsOf: url)
+                    let count = try getLibrary().restoreSourceArchive(data)
+                    reload()
+                    message = "已从备份恢复 \(count) 条导入音源及各平台勾选设置；未删除原有其他音源。"
+                } catch {
+                    message = "音源备份恢复失败：\(error.localizedDescription)"
+                }
+            }
             .alert("在线音源导入", isPresented: $isURLImporterPresented) {
                 TextField("https://…/source.js", text: $remoteScriptURL)
                     .textInputAutocapitalization(.never)
@@ -192,6 +247,16 @@ struct LXSourceTestPanel: View {
         let newLibrary = try LXSourceLibrary()
         library = newLibrary
         return newLibrary
+    }
+
+    @MainActor
+    private func exportSourceBackup() {
+        do {
+            sourceBackupDocument = LXSourceBackupDocument(contents: try getLibrary().exportSourceArchive())
+            isSourceBackupExporterPresented = true
+        } catch {
+            message = "创建音源备份失败：\(error.localizedDescription)"
+        }
     }
 
     @MainActor
