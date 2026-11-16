@@ -258,7 +258,6 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
     /// Search other platforms after native resolution fails. A normalized title
     /// and artist match is sufficient; duration and album metadata are ignored.
     private func resolveAlternativeSource(song: MusicSong, quality: MusicQuality, excludedURLIDs: Set<String> = []) async throws -> URL? {
-        let service = GDStudioMusicSearchService(session: session)
         let searchKeyword = AudioSourceTrackMatcher.searchTitle(song.title)
 
         // Search all four supported catalogs concurrently for cross-platform playback.
@@ -271,9 +270,9 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
                 albumOnly: false, useNativeNetEase: true
             )
         }
-        async let kuwo = captureSearch { try await searchKuwoWithNativeFallback(keyword: searchKeyword, service: service) }
-        async let kugou = captureSearch { try await service.search(keyword: searchKeyword, source: .kugou, count: 12) }
-        async let qq = captureSearch { try await service.search(keyword: searchKeyword, source: .qq, count: 12) }
+        async let kuwo = captureSearch { try await searchKuwoNative(keyword: searchKeyword) }
+        async let kugou: ([MusicSong], String?) = ([], nil)
+        async let qq = captureSearch { try await searchQQNative(keyword: searchKeyword) }
         let primaryResults = await [netease, kuwo, kugou, qq]
         try Task.checkCancellation()
 
@@ -379,25 +378,12 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
             return url
         }
 
-        // Migu remains available as a last-resort source, but its slow native
-        // search and subsequent GDStudio fallback no longer delay faster sources.
-        try Task.checkCancellation()
-        let miguResult = await captureSearch {
-            try await service.search(keyword: searchKeyword, source: .migu, count: 12)
-        }
-        if let failure = miguResult.1 {
-            searchFailures.append(failure)
-        }
-        if let url = try await resolveCandidates(makeCandidates(from: [miguResult.0])) {
-            return url
-        }
-
         if !candidateFailures.isEmpty {
             throw MusicSourceError.invalidResponse(
                 "跨平台备用解析异常：" + candidateFailures.joined(separator: "；")
             )
         }
-        if primaryResults.allSatisfy({ $0.0.isEmpty }) && miguResult.0.isEmpty && !searchFailures.isEmpty {
+        if primaryResults.allSatisfy({ $0.0.isEmpty }) && !searchFailures.isEmpty {
             throw MusicSourceError.invalidResponse(
                 "跨平台搜索接口异常：" + searchFailures.joined(separator: "；")
             )
@@ -414,17 +400,8 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
         return "cross-platform-url:" + String(hash, radix: 16)
     }
 
-    /// GDStudio can return HTTP errors for Kuwo while imported LX scripts still
-    /// support Kuwo. Obtain Kuwo-native song IDs before giving up on that channel.
-    private func searchKuwoWithNativeFallback(
-        keyword: String, service: GDStudioMusicSearchService
-    ) async throws -> [MusicSong] {
-        do {
-            let songs = try await service.search(keyword: keyword, source: .kuwo, count: 12)
-            if !songs.isEmpty { return songs }
-        } catch {
-            if Task.isCancelled || error is CancellationError { throw CancellationError() }
-        }
+    /// Obtain platform-native Kuwo song IDs for the imported JS source.
+    private func searchKuwoNative(keyword: String) async throws -> [MusicSong] {
         var components = URLComponents(string: "https://search.kuwo.cn/r.s")!
         components.queryItems = [
             URLQueryItem(name: "all", value: keyword),
@@ -465,6 +442,49 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
             detail: "count=\(songs.count)"
         )
         return songs
+    }
+
+    /// QQ's official catalog search returns the songmid required by imported LX scripts.
+    private func searchQQNative(keyword: String) async throws -> [MusicSong] {
+        let url = URL(string: "https://u.y.qq.com/cgi-bin/musicu.fcg")!
+        let body: [String: Any] = [
+            "req_0": [
+                "module": "music.search.SearchCgiService",
+                "method": "DoSearchForQQMusicDesktop",
+                "param": ["query": keyword, "search_type": 0, "num_per_page": 20, "page_num": 1]
+            ],
+            "comm": ["format": "json", "ct": 24, "cv": 0]
+        ]
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 10
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("https://y.qq.com/", forHTTPHeaderField: "Referer")
+        request.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode),
+              let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let req = root["req_0"] as? [String: Any],
+              (req["code"] as? Int ?? -1) == 0,
+              let result = req["data"] as? [String: Any],
+              let song = result["song"] as? [String: Any],
+              let rows = song["list"] as? [[String: Any]] else { return [] }
+        return rows.compactMap { row -> MusicSong? in
+            guard let mid = row["mid"] as? String ?? row["songmid"] as? String,
+                  let title = row["name"] as? String ?? row["songname"] as? String,
+                  let singers = row["singer"] as? [[String: Any]] else { return nil }
+            let artist = singers.compactMap { $0["name"] as? String }.joined(separator: " / ")
+            guard !artist.isEmpty else { return nil }
+            return MusicSong(
+                source: .qq, sourceID: mid, title: title, artist: artist,
+                album: (row["album"] as? [String: Any])?["name"] as? String,
+                artworkURL: nil, duration: (row["interval"] as? NSNumber)?.doubleValue,
+                hash: nil, albumID: nil, pictureID: nil, lyricID: nil,
+                copyrightID: nil
+            )
+        }
     }
 
     private func captureSearch(
