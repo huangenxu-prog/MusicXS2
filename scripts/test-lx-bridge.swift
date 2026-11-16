@@ -63,6 +63,25 @@ struct LXBridgeSmokeTest {
             throw NSError(domain: "LXSmoke", code: 8, userInfo: [NSLocalizedDescriptionKey: "helper script failed to register"])
         }
 
+        // LX scripts may use the callback's third argument for the parsed body.
+        let callbackSessionConfig = URLSessionConfiguration.ephemeral
+        callbackSessionConfig.protocolClasses = [LXMockURLProtocol.self]
+        let callbackHost = try LXSourceScriptHost(script: """
+        lx.on(lx.EVENT_NAMES.request, () => new Promise((resolve, reject) => {
+          lx.request('https://example.com/ip.php', { method: 'GET' }, (err, response, body) => {
+            if (err) return reject(err);
+            if (!body || body.ip !== '127.0.0.1') return reject(new Error('third callback body missing'));
+            if (response.body.ip !== body.ip) return reject(new Error('body mismatch'));
+            resolve('https://example.com/third-argument.mp3');
+          });
+        }));
+        lx.send(lx.EVENT_NAMES.inited, { sources: { tx: {} } });
+        """, session: URLSession(configuration: callbackSessionConfig))
+        let callbackURL = try await callbackHost.resolve(source: "tx", musicInfo: ["songmid": "TESTMID"])
+        guard callbackURL.absoluteString == "https://example.com/third-argument.mp3" else {
+            throw NSError(domain: "LXSmoke", code: 9)
+        }
+
         // Exercise the exact user-supplied Xinghai script with deterministic mocked HTTP.
         let fixtureURL = URL(fileURLWithPath: "scripts/fixtures/xinghai-v3.2.19.js")
         let fixture = try String(contentsOf: fixtureURL, encoding: .utf8)
