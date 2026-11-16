@@ -271,7 +271,7 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
                 albumOnly: false, useNativeNetEase: true
             )
         }
-        async let kuwo = captureSearch { try await service.search(keyword: searchKeyword, source: .kuwo, count: 12) }
+        async let kuwo = captureSearch { try await searchKuwoWithNativeFallback(keyword: searchKeyword, service: service) }
         async let kugou = captureSearch { try await service.search(keyword: searchKeyword, source: .kugou, count: 12) }
         async let qq = captureSearch { try await service.search(keyword: searchKeyword, source: .qq, count: 12) }
         let primaryResults = await [netease, kuwo, kugou, qq]
@@ -412,6 +412,59 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
             ($0 ^ UInt64($1)) &* UInt64(1099511628211)
         }
         return "cross-platform-url:" + String(hash, radix: 16)
+    }
+
+    /// GDStudio can return HTTP errors for Kuwo while imported LX scripts still
+    /// support Kuwo. Obtain Kuwo-native song IDs before giving up on that channel.
+    private func searchKuwoWithNativeFallback(
+        keyword: String, service: GDStudioMusicSearchService
+    ) async throws -> [MusicSong] {
+        do {
+            let songs = try await service.search(keyword: keyword, source: .kuwo, count: 12)
+            if !songs.isEmpty { return songs }
+        } catch {
+            if Task.isCancelled || error is CancellationError { throw CancellationError() }
+        }
+        var components = URLComponents(string: "https://search.kuwo.cn/r.s")!
+        components.queryItems = [
+            URLQueryItem(name: "all", value: keyword),
+            URLQueryItem(name: "ft", value: "music"),
+            URLQueryItem(name: "itemset", value: "web_2013"),
+            URLQueryItem(name: "client", value: "kt"),
+            URLQueryItem(name: "pn", value: "0"),
+            URLQueryItem(name: "rn", value: "20"),
+            URLQueryItem(name: "rformat", value: "json"),
+            URLQueryItem(name: "encoding", value: "utf8")
+        ]
+        var request = URLRequest(url: components.url!)
+        request.timeoutInterval = 10
+        request.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode) else { return [] }
+        let payload = try JSONSerialization.jsonObject(with: data)
+        guard let root = payload as? [String: Any],
+              let rows = root["abslist"] as? [[String: Any]] else { return [] }
+        let songs = rows.compactMap { row -> MusicSong? in
+            guard let rawID = (row["MUSICRID"] as? String) ?? (row["DC_TARGETID"] as? String),
+                  let name = row["SONGNAME"] as? String ?? row["NAME"] as? String,
+                  let artist = row["ARTIST"] as? String else { return nil }
+            let id = rawID.replacingOccurrences(of: "MUSIC_", with: "")
+            let duration = Double((row["DURATION"] as? String) ?? "") 
+            return MusicSong(
+                source: .kuwo, sourceID: id, title: name, artist: artist,
+                album: row["ALBUM"] as? String, artworkURL: nil,
+                duration: duration, hash: nil, albumID: nil,
+                pictureID: nil, lyricID: nil, copyrightID: nil
+            )
+        }
+        MusicSourceDiagnostics.shared.record(
+            event: "search", source: MusicSource.kuwo.rawValue,
+            provider: "kuwo-native-search", duration: 0,
+            result: songs.isEmpty ? "empty" : "success",
+            detail: "count=\(songs.count)"
+        )
+        return songs
     }
 
     private func captureSearch(
