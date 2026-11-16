@@ -116,6 +116,89 @@ final class LXSourceLibrary {
         set { UserDefaults.standard.set(newValue, forKey: platformKey) }
     }
 
+    private struct SavedSource: Codable {
+        let id: String
+        let name: String
+        let script: String
+        let approved: Bool
+        let platforms: [String]
+    }
+
+    private struct SourceArchive: Codable {
+        let version: Int
+        let savedAt: Date
+        let imported: [SavedSource]
+        let bundledPlatforms: [String: [String]]
+    }
+
+    /// Export actual JS text plus enablement flags; an iCloud/file backup can
+    /// restore user-installed sources after reinstalling the app.
+    func exportSourceArchive() throws -> Data {
+        let ids = try listIdentifiers()
+        let imported = try ids.filter { !isBundled(id: $0) }.map { id in
+            SavedSource(
+                id: id,
+                name: try filename(id: id),
+                script: try load(id: id),
+                approved: approvedIDs.contains(id),
+                platforms: enabledPlatforms(id: id).sorted()
+            )
+        }
+        let bundled = Dictionary(uniqueKeysWithValues: ids.filter { isBundled(id: $0) }
+            .map { ($0, enabledPlatforms(id: $0).sorted()) })
+        let archive = SourceArchive(version: 1, savedAt: Date(),
+                                    imported: imported, bundledPlatforms: bundled)
+        return try JSONEncoder().encode(archive)
+    }
+
+    /// Merge an archive without deleting any existing source. Restore the
+    /// archived UUID, name and platform switches so duplicates are not created.
+    func restoreSourceArchive(_ data: Data) throws -> Int {
+        guard data.count <= 30 * 1024 * 1024 else { throw LibraryError.tooLarge }
+        let archive = try JSONDecoder().decode(SourceArchive.self, from: data)
+        guard archive.version == 1, archive.imported.count <= 100 else {
+            throw LibraryError.invalidFile
+        }
+        var seen = Set<String>()
+        for item in archive.imported {
+            guard UUID(uuidString: item.id) != nil,
+                  seen.insert(item.id.lowercased()).inserted,
+                  item.name.utf8.count <= 512,
+                  item.script.utf8.count <= maximumSize,
+                  !item.script.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !Self.looksLikeHTML(item.script),
+                  Set(item.platforms).isSubset(of: Self.playbackPlatforms) else {
+                throw LibraryError.invalidFile
+            }
+        }
+        guard archive.bundledPlatforms.values.allSatisfy({
+            Set($0).isSubset(of: Self.playbackPlatforms)
+        }) else { throw LibraryError.invalidFile }
+
+        for item in archive.imported {
+            let id = item.id.lowercased()
+            try Data(item.script.utf8).write(
+                to: directory.appendingPathComponent(id).appendingPathExtension("js"),
+                options: .atomic)
+            try Data(item.name.utf8).write(
+                to: directory.appendingPathComponent(id).appendingPathExtension("name"),
+                options: .atomic)
+        }
+        var approved = approvedIDs
+        var overrides = platformOverrides
+        for item in archive.imported {
+            let id = item.id.lowercased()
+            if item.approved { approved.insert(id) } else { approved.remove(id) }
+            overrides[id] = item.platforms.filter { Self.playbackPlatforms.contains($0) }
+        }
+        for (id, platforms) in archive.bundledPlatforms where isBundled(id: id) {
+            overrides[id.lowercased()] = platforms
+        }
+        UserDefaults.standard.set(approved.sorted(), forKey: approvedKey)
+        platformOverrides = overrides
+        return archive.imported.count
+    }
+
     func isJiexiang(id: String) -> Bool {
         guard let script = try? load(id: id) else { return false }
         let header = String(script.prefix(4096)).lowercased()
