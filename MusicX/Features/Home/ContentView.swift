@@ -450,9 +450,12 @@ struct ContentView: View {
             .id(route.id)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(MusicXPageBackground())
+            // Navigation direction is fixed: push enters from the right,
+            // pop exits to the right. A transient back-navigation flag must
+            // not reverse a newly inserted page during the same animation.
             .transition(.asymmetric(
-                insertion: .move(edge: isDiscoveryPopping ? .leading : .trailing),
-                removal: .move(edge: isDiscoveryPopping ? .trailing : .leading)
+                insertion: .move(edge: .trailing),
+                removal: .move(edge: .trailing)
             ))
             .zIndex(30)
         }
