@@ -208,7 +208,7 @@ struct LXSourceTestPanel: View {
             let platforms = host.registeredSources.keys.sorted()
             let events = host.initializationEvents.suffix(8).joined(separator: "；")
             if ready {
-                message = "初始化完成，已注册：\(platforms.joined(separator: ", "))。事件：\(events)"
+                let detail = platforms.map { platform -> String in\n                    let metadata = host.registeredSources[platform] as? [String: Any]\n                    let qualities = metadata?["qualitys"] as? [String] ?? []\n                    return "\(platform)[\(qualities.joined(separator: ", "))]"\n                }.joined(separator: "；")\n                message = "初始化完成，平台及音质：\(detail)。事件：\(events)"
             } else {
                 message = "脚本加载完成，但 8 秒内未注册音源。收到 inited：\(host.didReceiveInitialization)；JS 错误：\(host.lastError ?? "无")；事件：\(events.isEmpty ? "无" : events)"
             }
@@ -285,10 +285,16 @@ struct LXSourceTestPanel: View {
                 "hash": song.hash ?? song.sourceID,
                 "albumId": song.albumID ?? ""
             ]
-            let url = try await host.resolve(source: testPlatform, musicInfo: info, quality: "320k", timeout: 20)
+            // LX sources advertise their supported qualities per platform.
+            // Do not force 320k when a script only registers 128k (e.g. fallback sources).
+            let sourceMetadata = host.registeredSources[testPlatform] as? [String: Any]
+            let supportedQualities = sourceMetadata?["qualitys"] as? [String] ?? []
+            let quality = supportedQualities.isEmpty || supportedQualities.contains("320k")
+                ? "320k" : (supportedQualities.contains("128k") ? "128k" : supportedQualities[0])
+            let url = try await host.resolve(source: testPlatform, musicInfo: info, quality: quality, timeout: 20)
             stopPreview()
             previewURL = url
-            message = "解析成功，已取得 URL。点击试听验证播放：\(url.absoluteString)"
+            message = "解析成功（请求音质：\(quality)），已取得 URL。点击试听验证播放：\(url.absoluteString)"
         } catch {
             message = "真实取链失败：\(error.localizedDescription)"
         }
