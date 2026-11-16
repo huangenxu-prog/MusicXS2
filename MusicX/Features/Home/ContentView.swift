@@ -345,11 +345,13 @@ struct ContentView: View {
                 }
             }
             .id(selectedTab)
-            .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
+            // Match native tab navigation: a subtle crossfade, rather than
+            // a horizontal page push that can look like a backwards gesture.
+            .transition(.opacity)
         }
-        // Tab transitions animate only the tab content, not the player,
-        // bottom controls or other independently presented pages.
-        .animation(.easeInOut(duration: 0.28), value: selectedTab)
+        // Tab transitions are a short 0.20 s crossfade; pushed pages keep
+        // their original 0.28 s right-side slide transitions.
+        .animation(.easeInOut(duration: 0.20), value: selectedTab)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !(selectedTab == .search && searchFieldFocused) {
@@ -1782,7 +1784,7 @@ struct ContentView: View {
                     if value.startLocation.y <= 120,
                        vertical > 110,
                        vertical > abs(horizontal) * 1.25 {
-                        withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                        withAnimation(.easeInOut(duration: 0.28)) {
                             isPlayerPresented = false
                         }
                         return
@@ -1790,7 +1792,7 @@ struct ContentView: View {
                     guard value.startLocation.x <= 28,
                           horizontal > 80,
                           horizontal > abs(vertical) * 1.25 else { return }
-                    withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                    withAnimation(.easeInOut(duration: 0.28)) {
                         isPlayerPresented = false
                     }
                 })
