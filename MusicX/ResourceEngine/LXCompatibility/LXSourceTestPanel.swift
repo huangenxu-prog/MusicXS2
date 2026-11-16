@@ -47,7 +47,7 @@ struct LXSourceTestPanel: View {
                                         .foregroundStyle(selectedID == id ? .green : .secondary)
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text((try? getLibrary().filename(id: id)) ?? id).lineLimit(1)
-                                        Text((try? getLibrary().approvedIDs.contains(id)) == true ? "已通过试听 · 正式播放通道已启用" : "测试音源 · 试听成功后自动启用")
+                                        Text(((try? getLibrary().isBundled(id: id)) == true) ? "内置音源 · 已接入正式播放" : ((try? getLibrary().approvedIDs.contains(id)) == true ? "已通过试听 · 正式播放通道已启用" : "测试音源 · 试听成功后自动启用"))
                                             .font(.caption2).foregroundStyle(.secondary)
                                     }
                                 }
@@ -157,7 +157,8 @@ struct LXSourceTestPanel: View {
         do {
             let store = try getLibrary()
             importedIDs = try store.listIdentifiers()
-            selectedID = store.selectedID
+            selectedID = store.selectedID.flatMap { importedIDs.contains($0) ? $0 : nil } ?? importedIDs.first
+            if let selectedID, store.selectedID != selectedID { try store.select(id: selectedID) }
         }
         catch { message = "读取失败：\(error.localizedDescription)" }
     }
@@ -415,7 +416,14 @@ struct LXSourceTestPanel: View {
     private func delete(at offsets: IndexSet) {
         do {
             let store = try getLibrary()
-            for index in offsets { try store.remove(id: importedIDs[index]) }
+            for index in offsets {
+                let id = importedIDs[index]
+                if store.isBundled(id: id) {
+                    message = "内置音源无法删除，可直接测试或切换。"
+                    continue
+                }
+                try store.remove(id: id)
+            }
             reload()
         } catch { message = "删除失败：\(error.localizedDescription)" }
     }
