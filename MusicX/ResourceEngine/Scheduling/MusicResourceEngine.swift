@@ -160,46 +160,59 @@ private struct ImportedLXSourceProvider: MusicResourceProvider {
         }
         guard !scripts.isEmpty else { return nil }
 
-        let info: [String: Any] = [
-            "songmid": song.sourceID,
-            "id": song.sourceID,
-            "name": song.title,
-            "singer": song.artist,
-            "albumName": song.album ?? "",
-            "interval": Int(song.duration ?? 0),
-            "hash": song.hash ?? song.sourceID,
-            "albumId": song.albumID ?? ""
-        ]
-        // Each host owns a JSContext and must remain on the main actor.
-        // Keep failures independent: one broken imported script cannot block the others.
-        var failures: [String] = []
-        for (id, script) in scripts {
-            try Task.checkCancellation()
-            do {
-                let host = try await MainActor.run { try LXSourceScriptHost(script: script) }
-                let ready = await host.awaitRegistration(timeout: 8)
-                guard ready else { continue }
-                let metadata = await MainActor.run { host.registeredSources[platform] as? [String: Any] }
-                guard let metadata else { continue }
-                let qualities = metadata["qualitys"] as? [String] ?? []
-                let requested = qualities.contains("320k") ? "320k"
-                    : (qualities.contains("128k") ? "128k" : (qualities.first ?? "320k"))
-                let url = try await host.resolve(
-                    source: platform, musicInfo: info, quality: requested, timeout: 15
-                )
-                return ResolvedMusicResource(
-                    url: url, providerID: "lx:\(id):\(platform)",
-                    providerName: "洛雪导入音源"
-                )
-            } catch {
-                if Task.isCancelled || error is CancellationError { throw CancellationError() }
-                failures.append(error.localizedDescription)
+        // Each JSContext is confined to the main actor. Network callbacks can
+        // complete independently; the first valid URL wins and remaining tasks
+        // are cancelled. Script failures never disable other imported sources.
+        return try await withThrowingTaskGroup(of: ResolvedMusicResource?.self) { group in
+            for (id, script) in scripts {
+                group.addTask { @MainActor in
+                    do {
+                        try Task.checkCancellation()
+                        let host = try LXSourceScriptHost(script: script)
+                        guard await host.awaitRegistration(timeout: 8),
+                              let metadata = host.registeredSources[platform] as? [String: Any] else {
+                            return nil
+                        }
+                        let qualities = metadata["qualitys"] as? [String] ?? []
+                        let requested = qualities.contains("320k") ? "320k"
+                            : (qualities.contains("128k") ? "128k" : (qualities.first ?? "320k"))
+                        let info: [String: Any] = [
+                            "songmid": song.sourceID,
+                            "id": song.sourceID,
+                            "name": song.title,
+                            "singer": song.artist,
+                            "albumName": song.album ?? "",
+                            "interval": Int(song.duration ?? 0),
+                            "hash": song.hash ?? song.sourceID,
+                            "albumId": song.albumID ?? ""
+                        ]
+                        let url = try await host.resolve(
+                            source: platform, musicInfo: info, quality: requested, timeout: 15
+                        )
+                        try Task.checkCancellation()
+                        return ResolvedMusicResource(
+                            url: url, providerID: "lx:\(id):\(platform)",
+                            providerName: "洛雪导入音源"
+                        )
+                    } catch {
+                        if Task.isCancelled || error is CancellationError { return nil }
+                        MusicSourceDiagnostics.shared.record(
+                            event: "lx-imported-resolve", source: song.source.rawValue,
+                            provider: "lx:\(id):\(platform)", duration: 0,
+                            result: "failed", detail: error.localizedDescription
+                        )
+                        return nil
+                    }
+                }
             }
+            while let candidate = try await group.next() {
+                if let candidate {
+                    group.cancelAll()
+                    return candidate
+                }
+            }
+            return nil
         }
-        if !failures.isEmpty {
-            throw MusicSourceError.invalidResponse("导入音源解析失败：" + failures.prefix(3).joined(separator: "；"))
-        }
-        return nil
     }
 }
 
