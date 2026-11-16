@@ -58,6 +58,22 @@ enum AudioSourceTrackMatcher {
         return max(1, score)
     }
 
+    /// Search by the work's title, not a platform-specific edition suffix.
+    /// Preserve Chinese characters and original title punctuation where possible.
+    static func searchTitle(_ title: String) -> String {
+        var result = title
+        let suffixes = [
+            #"(?i)\\s*[（(\\[【]\\s*(?:live|concert|remix|instrumental|acoustic|remaster(?:ed)?|official|original|无损|现场版?|演唱会版?|伴奏版?|混音版?|标准版|官方版|原版)\\s*[)）\\]】]\\s*$"#,
+            #"(?i)\\s*[-–—]\\s*(?:live|concert|remix|无损|现场版?|演唱会版?|伴奏版?|标准版)\\s*$"#
+        ]
+        for pattern in suffixes {
+            result = result.replacingOccurrences(of: pattern, with: "",
+                                                  options: .regularExpression)
+        }
+        let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? title : trimmed
+    }
+
     static func durationDifference(original: MusicSong, candidateDuration: TimeInterval?) -> TimeInterval {
         guard let expected = original.duration, let actual = candidateDuration else {
             return .greatestFiniteMagnitude
