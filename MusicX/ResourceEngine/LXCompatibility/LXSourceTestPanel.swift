@@ -105,7 +105,8 @@ struct LXSourceTestPanel: View {
                     if isResolving { ProgressView("正在解析选中的歌曲…") }
                     if previewURL != nil {
                         Button(previewPlayer == nil ? "试听解析结果" : "停止试听") { togglePreview() }
-                        Text("以实际试听为准；独立 HTTP 探测可能误判可播放地址。")
+                        .disabled(isProbingURL)
+                        Text(isProbingURL ? "正在自动验证地址是否返回真实音频…" : "HTTP 检查自动执行；是否实际出声以最终试听为准。")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     Text("选择平台后搜索并取链。搜索仍使用现有服务，尚未移植洛雪原生搜索模块。")
@@ -138,7 +139,7 @@ struct LXSourceTestPanel: View {
                 Button("取消", role: .cancel) {}
                 Button("导入") { Task { await importRemoteScript() } }
             } message: {
-                Text("输入 HTTPS 的 JS 文件直链。导入后保存到本地，后续仍需手动选择和测试。")
+                Text("输入 HTTPS 的 JS 文件直链。导入后自动检查注册；解析歌曲时自动检查播放地址。")
             }
             .onAppear { reload() }
             .onDisappear { stopPreview() }
@@ -197,7 +198,8 @@ struct LXSourceTestPanel: View {
             try getLibrary().select(id: imported.id)
             selectedID = imported.id
             remoteScriptURL = ""
-            message = "在线音源已导入：\(imported.filename)。请点击「检查」确认注册，再测试取链。"
+            inspect(id: imported.id)
+            message = "在线音源已导入：\(imported.filename)。正在自动检查注册。"
         } catch {
             message = "在线音源导入失败：\(error.localizedDescription)"
         }
@@ -305,13 +307,11 @@ struct LXSourceTestPanel: View {
             let url = try await host.resolve(source: testPlatform, musicInfo: info, quality: quality, timeout: 20)
             stopPreview()
             previewURL = url
-            let hostName = url.host?.lowercased() ?? ""
-            if hostName == "yinyue.haitangw.net" {
-                message = "长青生成了 PHP 接口地址（音质：\(quality)），尚未确认音频可播放。请点击试听：\(url.absoluteString)"
-            } else if hostName == "music-dl.sayqz.com" {
-                message = "幻音生成了解析接口地址（音质：\(quality)），尚未确认域名及音频可用。请点击试听：\(url.absoluteString)"
-            } else {
-                message = "取得候选地址（音质：\(quality)），尚未验证实际播放。请点击试听：\(url.absoluteString)"
+            message = "取得候选播放地址，正在自动检查 HTTP 响应和音频特征…"
+            let report = await probePreviewURL(url)
+            // Ignore a stale probe if a later search or platform switch replaced the URL.
+            if previewURL == url {
+                message = "取链音质：\\(quality)。\\(report)；地址：\\(url.absoluteString)"
             }
         } catch {
             message = "真实取链失败：\(error.localizedDescription)"
@@ -326,12 +326,10 @@ struct LXSourceTestPanel: View {
         previewPlayer = nil
     }
 
-    /// Probe only the first bytes of the resolved URL; never download a whole song.
-    /// The request is intentionally separate from AVPlayer to distinguish
-    /// invalid backend responses from player/codec failures.
+    /// Inspect a small streaming prefix, never download the whole track.
+    /// This is a technical HTTP check, not proof that AVPlayer emits sound.
     @MainActor
-    private func probePreviewURL() async {
-        guard let url = previewURL, !isProbingURL else { return }
+    private func probePreviewURL(_ url: URL) async -> String {
         isProbingURL = true
         defer { isProbingURL = false }
         var request = URLRequest(url: url)
@@ -341,27 +339,42 @@ struct LXSourceTestPanel: View {
         do {
             let (bytes, response) = try await URLSession.shared.bytes(for: request)
             guard let http = response as? HTTPURLResponse else {
-                message = "地址诊断：服务器未返回 HTTP 响应"
-                return
+                return "HTTP 检查失败：服务器未返回 HTTP 响应"
+            }
+            let mime = (http.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased()
+            let domain = http.url?.host ?? "未知"
+            guard (200...299).contains(http.statusCode) else {
+                return "HTTP 检查失败：状态码 \\(http.statusCode)，域名 \\(domain)"
             }
             var prefix = [UInt8]()
             for try await byte in bytes {
                 prefix.append(byte)
                 if prefix.count >= 128 { break }
             }
-            let mime = http.value(forHTTPHeaderField: "Content-Type") ?? "未提供"
-            let location = http.url?.host ?? "未知"
-            let signature = prefix.prefix(16).map { String(format: "%02X", $0) }.joined(separator: " ")
-            let text = String(bytes: prefix, encoding: .utf8) ?? ""
-            let looksLikePage = text.lowercased().contains("<html") ||
-                text.lowercased().contains("<!doctype") ||
-                text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("{")
-            let classification = looksLikePage ? "疑似网页或 JSON 错误响应" :
-                (mime.lowercased().contains("audio") || mime.lowercased().contains("octet-stream") ?
-                 "响应类型可能是音频" : "响应类型未确认是音频")
-            message = "地址诊断：HTTP \(http.statusCode)；最终域名：\(location)；Content-Type：\(mime)；接收前缀：\(prefix.count) 字节；特征：\(signature)；判断：\(classification)。"
+            guard !prefix.isEmpty else {
+                return "HTTP 检查失败：返回了空数据（\\(domain)）"
+            }
+            let rawText = String(bytes: prefix, encoding: .utf8)?.lowercased() ?? ""
+            let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isPage = trimmed.hasPrefix("{") || trimmed.hasPrefix("[") ||
+                trimmed.hasPrefix("<") || rawText.contains("<html") || rawText.contains("<!doctype")
+            if isPage || mime.contains("application/json") || mime.contains("text/html") {
+                return "HTTP 检查失败：服务器返回网页或 JSON，而不是音频（\\(domain)）"
+            }
+            let isID3 = prefix.starts(with: [0x49, 0x44, 0x33])
+            let isMP3 = prefix.count >= 2 && prefix[0] == 0xFF && (prefix[1] & 0xE0) == 0xE0
+            let isFLAC = prefix.starts(with: [0x66, 0x4C, 0x61, 0x43])
+            let isOgg = prefix.starts(with: [0x4F, 0x67, 0x67, 0x53])
+            let isMp4 = prefix.count >= 8 && Array(prefix[4..<8]) == [0x66, 0x74, 0x79, 0x70]
+            if isID3 || isMP3 || isFLAC || isOgg || isMp4 {
+                return "HTTP 检查通过：\\(http.statusCode)，检测到音频文件特征（\\(domain)）；尚未确认出声"
+            }
+            if mime.contains("audio/") || mime.contains("application/octet-stream") {
+                return "HTTP 检查初步通过：\\(http.statusCode)，音频 MIME=\\(mime)（\\(domain)），文件头未识别；尚未确认出声"
+            }
+            return "HTTP \\(http.statusCode)；文件头和 MIME 未能确认音频（\\(domain)），需要进一步验证"
         } catch {
-            message = "地址诊断请求失败：\(error.localizedDescription)"
+            return "HTTP 检查未通过：\\(error.localizedDescription)"
         }
     }
 
