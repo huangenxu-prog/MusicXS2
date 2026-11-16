@@ -145,6 +145,15 @@ private struct ImportedLXSourceProvider: MusicResourceProvider {
     let excludedScriptIDs: Set<String>
     let excludedURLIDs: Set<String>
 
+    private static func isJiexiangScript(_ script: String) -> Bool {
+        // Match script identity, not a random per-install import UUID.
+        // Require both author homepage and source name to avoid blocking
+        // unrelated scripts merely referencing Jiexiang as a backend.
+        let header = String(script.prefix(4096)).lowercased()
+        return header.contains("@homepage https://github.com/haonanren118/jiexiang-music-source")
+            && header.contains("@name 杰翔聚合音源")
+    }
+
     func resolve(song: MusicSong, quality: MusicQuality) async throws -> ResolvedMusicResource? {
         let platform: String
         switch song.source {
@@ -193,6 +202,18 @@ private struct ImportedLXSourceProvider: MusicResourceProvider {
         return try await withThrowingTaskGroup(of: ResolvedMusicResource?.self) { group in
             for (id, script) in scripts {
                 guard !excludedScriptIDs.contains("lx:\(id):\(platform)") else { continue }
+                // Jiexiang's QQ backend may return an obsolete spoken notice
+                // as a valid audio stream. Keep its verified wy/kw/kg support,
+                // but do not let its tx URL win over healthy QQ sources.
+                if platform == "tx" && Self.isJiexiangScript(script) {
+                    MusicSourceDiagnostics.shared.record(
+                        event: "lx-imported-registration", source: song.source.rawValue,
+                        provider: "lx:\(id):tx", duration: 0,
+                        result: "blocked_platform",
+                        detail: "Jiexiang QQ disabled: backend returns obsolete voice notice"
+                    )
+                    continue
+                }
                 group.addTask { @MainActor in
                     do {
                         try Task.checkCancellation()
