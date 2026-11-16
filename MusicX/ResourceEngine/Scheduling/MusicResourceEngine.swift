@@ -164,17 +164,23 @@ private struct ImportedLXSourceProvider: MusicResourceProvider {
         default: return nil
         }
 
-        let scripts = try await MainActor.run { () throws -> [(String, String)] in
+        let scripts = await MainActor.run { () -> [(String, String)] in
             var scripts: [(String, String)] = []
+            let library = try? LXSourceLibrary()
             if let url = Bundle.main.url(forResource: "BundledLXSources", withExtension: "json"),
                let data = try? Data(contentsOf: url),
                let bundled = try? JSONDecoder().decode([BundledLXScript].self, from: data) {
-                scripts = bundled.map { ($0.id, $0.contents) }
+                for source in bundled {
+                    if library?.enabledPlatforms(id: source.id).contains(platform) ?? true {
+                        scripts.append((source.id, source.contents))
+                    }
+                }
             }
-            // Only scripts whose preview actually started playback are approved.
-            // Re-read on every resolution so imports and deletions take effect without rebuilding.
-            if let library = try? LXSourceLibrary() {
+            // Re-read approval and per-platform checkboxes each time; changing
+            // a checkbox takes effect on the next resolution, without rebuilding.
+            if let library {
                 for id in library.approvedIDs.sorted() {
+                    guard library.enabledPlatforms(id: id).contains(platform) else { continue }
                     if let script = try? library.load(id: id) {
                         scripts.append((id, script))
                     }
