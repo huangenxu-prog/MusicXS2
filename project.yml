@@ -23,6 +23,7 @@ targets:
         UIBackgroundModes:
           - audio
         NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true # LX compatibility test only; revert before production
           NSExceptionDomains:
             yinyue.haitangw.net:
               NSExceptionAllowsInsecureHTTPLoads: true
