@@ -286,13 +286,21 @@ struct ContentView: View {
 
     private var presentationView: some View {
         playbackView
-            .overlay { allCollectionsOverlay }
-            .animation(.easeInOut(duration: 0.28), value: showAllCollections)
-            .overlay { discoveryOverlay }
-            .animation(.easeInOut(duration: 0.28), value: discoveryRoute?.id)
-            .overlay { playerOverlay }
-            .animation(.easeInOut(duration: 0.28), value: isPlayerPresented)
-            .animation(.easeInOut(duration: 0.28), value: selectedTab)
+            // Keep each transition scoped to its own overlay. Applying multiple
+            // animations to the entire playback tree also animates unrelated
+            // player-progress, artwork and list updates during navigation.
+            .overlay {
+                allCollectionsOverlay
+                    .animation(.easeInOut(duration: 0.28), value: showAllCollections)
+            }
+            .overlay {
+                discoveryOverlay
+                    .animation(.easeInOut(duration: 0.28), value: discoveryRoute?.id)
+            }
+            .overlay {
+                playerOverlay
+                    .animation(.easeInOut(duration: 0.28), value: isPlayerPresented)
+            }
     }
 
     private var playbackView: some View {
@@ -339,6 +347,9 @@ struct ContentView: View {
             .id(selectedTab)
             .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
         }
+        // Tab transitions animate only the tab content, not the player,
+        // bottom controls or other independently presented pages.
+        .animation(.easeInOut(duration: 0.28), value: selectedTab)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !(selectedTab == .search && searchFieldFocused) {
