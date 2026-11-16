@@ -162,8 +162,15 @@ private struct ImportedLXSourceProvider: MusicResourceProvider {
                let bundled = try? JSONDecoder().decode([BundledLXScript].self, from: data) {
                 scripts = bundled.map { ($0.id, $0.contents) }
             }
-            // Production uses only the four approved bundled scripts.
-            // User imports remain available in the diagnostic panel.
+            // Only scripts whose preview actually started playback are approved.
+            // Re-read on every resolution so imports and deletions take effect without rebuilding.
+            if let library = try? LXSourceLibrary() {
+                for id in library.approvedIDs.sorted() {
+                    if let script = try? library.load(id: id) {
+                        scripts.append((id, script))
+                    }
+                }
+            }
             return scripts
         }
         guard !scripts.isEmpty else {
