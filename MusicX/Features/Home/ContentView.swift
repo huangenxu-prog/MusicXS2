@@ -279,13 +279,15 @@ struct ContentView: View {
             }
             .onChange(of: playerStore.isPlaying) { _, _ in savePlaybackSession() }
             .onChange(of: playbackQueueSongs.map(\.id)) { _, _ in savePlaybackSession() }
-            .sheet(isPresented: $showAllCollections) { allCollectionsPage }
+            
             .task { await loadHomeSongs() }
             .task { await loadOfficialCollections() }
     }
 
     private var presentationView: some View {
         playbackView
+            .overlay { allCollectionsOverlay }
+            .animation(.easeInOut(duration: 0.28), value: showAllCollections)
             .overlay { discoveryOverlay }
             .animation(.easeInOut(duration: 0.28), value: discoveryRoute?.id)
             .overlay { playerOverlay }
@@ -359,6 +361,18 @@ struct ContentView: View {
     }
 
     @ViewBuilder
+    private var allCollectionsOverlay: some View {
+        if showAllCollections {
+            allCollectionsPage
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(MusicXTheme.background)
+                .transition(.asymmetric(insertion: .move(edge: .trailing),
+                                        removal: .move(edge: .trailing)))
+                .zIndex(25)
+        }
+    }
+
+    @ViewBuilder
     private var discoveryOverlay: some View {
         if let route = discoveryRoute {
             MusicDiscoveryPage(
@@ -377,6 +391,12 @@ struct ContentView: View {
                     withAnimation(.easeInOut(duration: 0.28)) { discoveryRoute = nil }
                 },
                 onPlay: { playDiscoverySong($0) },
+                isFavorite: { song in favorites.contains(stableSongID(song)) },
+                onToggleFavorite: { song in
+                    let item = AppSong(id: stableSongID(song), title: song.title, artist: song.artist,
+                                       album: song.album ?? "", tint: MusicXTheme.blue, onlineSong: song)
+                    toggleFavorite(item)
+                },
                 currentSong: currentSong?.onlineSong,
                 isPlaying: playerStore.isPlaying,
                 onTogglePlayback: { toggleCurrentPlayback() },
@@ -626,7 +646,7 @@ struct ContentView: View {
                     Capsule().fill(MusicXTheme.blue).frame(width: 3, height: 21)
                     Text("推荐歌单").font(.system(size: 20, weight: .bold)).foregroundStyle(.white)
                     Spacer()
-                    Button { showAllCollections = true } label: {
+                    Button { withAnimation(.easeInOut(duration: 0.28)) { showAllCollections = true } } label: {
                         HStack(spacing: 6) {
                             Text("查看全部")
                             Image(systemName: "chevron.right")
@@ -1030,7 +1050,7 @@ struct ContentView: View {
                             sourceAccessPhrase = ""
                         }
                         Button("验证暗号") {
-                            if sourceAccessPhrase == "浅笑" {
+                            if sourceAccessPhrase == "qianxiao" {
                                 isSourceAccessGrantedPresented = true
                             } else {
                                 isSourceAccessDeniedPresented = true
