@@ -525,7 +525,7 @@ struct ContentView: View {
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(.white.opacity(0.26), lineWidth: 0.9))
             .shadow(color: colors.first?.opacity(0.20) ?? .clear, radius: 10, y: 4)
-        }.buttonStyle(.plain)
+        }.buttonStyle(MusicCardPressStyle())
     }
 
     private func featuredCard(title: String, subtitle: String, route: MusicDiscoveryRoute, variant: Int) -> some View {
@@ -550,16 +550,34 @@ struct ContentView: View {
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(.white.opacity(0.16), lineWidth: 1))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(MusicCardPressStyle())
     }
 
     private var newMusicSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             homeSectionTitle("新歌速递", action: { discoveryRoute = .newReleases }).padding(.horizontal, 14)
             if isLoadingHomeSongs && songs.isEmpty {
-                ProgressView().tint(MusicXTheme.blue).frame(maxWidth: .infinity).padding(.vertical, 24)
+                MusicSongLoadingPlaceholder()
+                    .padding(.horizontal, 20)
             } else if let homeLoadError, songs.isEmpty {
-                Text(homeLoadError).font(.system(size: 13)).foregroundStyle(MusicXTheme.muted).padding(.vertical, 14)
+                VStack(spacing: 12) {
+                    Image(systemName: "music.note.list")
+                        .font(.system(size: 24, weight: .light))
+                        .foregroundStyle(.white.opacity(0.65))
+                    Text(homeLoadError)
+                        .font(.system(size: 13)).foregroundStyle(MusicXTheme.muted)
+                        .multilineTextAlignment(.center)
+                    Button { Task { await loadHomeSongs() } } label: {
+                        Label("重新加载", systemImage: "arrow.clockwise")
+                            .font(.system(size: 13, weight: .semibold))
+                            .padding(.horizontal, 16).padding(.vertical, 10)
+                            .background(.white.opacity(0.09), in: Capsule())
+                    }
+                    .buttonStyle(MusicCardPressStyle())
+                }
+                .frame(maxWidth: .infinity).padding(.vertical, 24)
+                .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 18))
+                .padding(.horizontal, 20)
             } else {
                 VStack(spacing: 5) {
                     ForEach(0..<min(songs.count, 6), id: \.self) { index in
@@ -1049,9 +1067,19 @@ struct ContentView: View {
 
     private func emptyState(icon: String, title: String, detail: String) -> some View {
         VStack(spacing: 12) {
-            Image(systemName: icon).font(.system(size: 34, weight: .light)).foregroundStyle(MusicXTheme.muted)
+            Image(systemName: icon)
+                .font(.system(size: 30, weight: .light))
+                .foregroundStyle(.white.opacity(0.8))
+                .frame(width: 76, height: 76)
+                .background(
+                    LinearGradient(colors: [Color.purple.opacity(0.25), Color.pink.opacity(0.08)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing),
+                    in: RoundedRectangle(cornerRadius: 25, style: .continuous)
+                )
+                .overlay(RoundedRectangle(cornerRadius: 25).stroke(.white.opacity(0.09), lineWidth: 1))
             Text(title).font(.system(size: 17, weight: .semibold))
             Text(detail).font(.system(size: 13)).foregroundStyle(MusicXTheme.muted)
+                .multilineTextAlignment(.center).lineSpacing(4).padding(.horizontal, 28)
         }
         .frame(maxWidth: .infinity).padding(.vertical, 48)
     }
@@ -1160,7 +1188,7 @@ struct ContentView: View {
             }.frame(width: 132, height: 132)
                 .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).stroke(.white.opacity(0.18), lineWidth: 1))
-        }.buttonStyle(.plain)
+        }.buttonStyle(MusicCardPressStyle())
     }
 
     private func chartTile(_ title: String, subtitle: String, rank: String, icon: String, color: Color, width: CGFloat) -> some View {
@@ -2460,5 +2488,39 @@ private struct FlowTags: View {
                     .background(MusicXTheme.surface, in: Capsule())
             }
         }
+    }
+}
+
+/// Small tactile response for discovery cards; honors Reduce Motion.
+private struct MusicCardPressStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.975 : 1)
+            .opacity(configuration.isPressed ? 0.86 : 1)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: configuration.isPressed)
+    }
+}
+
+private struct MusicSongLoadingPlaceholder: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            ForEach(0..<6, id: \.self) { index in
+                HStack(spacing: 13) {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(.white.opacity(0.08)).frame(width: 48, height: 48)
+                    VStack(alignment: .leading, spacing: 9) {
+                        Capsule().fill(.white.opacity(0.11))
+                            .frame(width: index.isMultiple(of: 2) ? 142 : 112, height: 11)
+                        Capsule().fill(.white.opacity(0.06)).frame(width: 76, height: 8)
+                    }
+                    Spacer()
+                    Circle().stroke(.white.opacity(0.08), lineWidth: 1).frame(width: 24, height: 24)
+                }
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("正在加载新歌")
     }
 }
