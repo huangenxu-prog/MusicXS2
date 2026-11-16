@@ -677,7 +677,17 @@ struct ContentView: View {
         GeometryReader { geometry in
             let tileWidth = max(0, (geometry.size.width - 56) / 3)
             ZStack(alignment: .top) {
-                MusicXTheme.background.ignoresSafeArea()
+                LinearGradient(
+                    stops: [
+                        .init(color: Color(red: 0.10, green: 0.09, blue: 0.23), location: 0),
+                        .init(color: Color(red: 0.23, green: 0.14, blue: 0.38), location: 0.18),
+                        .init(color: MusicXTheme.background, location: 0.46),
+                        .init(color: MusicXTheme.background, location: 1)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 0) {
                         allCollectionsHeader
@@ -1310,11 +1320,26 @@ struct ContentView: View {
                 songArtwork(song.onlineSong, tint: song.tint, size: 44)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(song.title).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white).lineLimit(1)
-                    Text(song.artist).font(.system(size: 12)).foregroundStyle(MusicXTheme.muted).lineLimit(1)
+                    Text(song.title).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white).lineLimit(1).truncationMode(.tail)
+                    Text(song.artist).font(.system(size: 12)).foregroundStyle(MusicXTheme.muted).lineLimit(1).truncationMode(.tail)
                 }.frame(maxWidth: .infinity, alignment: .leading)
-                if let duration = song.onlineSong?.duration, duration > 0 {
-                    Text(playerTime(duration)).font(.system(size: 12, weight: .medium, design: .rounded)).monospacedDigit().foregroundStyle(MusicXTheme.muted)
+                Text(song.onlineSong?.duration.flatMap { $0 > 0 && $0.isFinite ? playerTime($0) : nil } ?? "--:--")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .monospacedDigit().foregroundStyle(MusicXTheme.muted)
+                    .frame(width: 43, alignment: .trailing)
+                Menu {
+                    Button {
+                        toggleFavorite(song)
+                    } label: {
+                        Label(favorites.contains(song.id) ? "取消收藏" : "收藏歌曲",
+                              systemImage: favorites.contains(song.id) ? "heart.slash" : "heart")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 18))
+                        .foregroundStyle(MusicXTheme.muted)
+                        .frame(width: 36, height: 42)
+                        .contentShape(Rectangle())
                 }
             }.contentShape(Rectangle()).padding(.vertical, 7)
         }.buttonStyle(.plain)
