@@ -147,6 +147,27 @@ struct MusicDiscoveryPage: View {
     var body: some View {
         ZStack {
             Color(red: 10/255, green: 14/255, blue: 31/255).ignoresSafeArea()
+            if usesPlaylistDetailAtmosphere {
+                LinearGradient(
+                    stops: [
+                        .init(color: Color(red: 0.20, green: 0.12, blue: 0.35).opacity(0.95), location: 0),
+                        .init(color: Color(red: 0.14, green: 0.11, blue: 0.28).opacity(0.65), location: 0.42),
+                        .init(color: .clear, location: 1)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 480)
+                .frame(maxHeight: .infinity, alignment: .top)
+                .ignoresSafeArea(edges: .top)
+                RadialGradient(
+                    colors: [Color(red: 0.53, green: 0.19, blue: 0.57).opacity(0.40), .clear],
+                    center: .topTrailing, startRadius: 0, endRadius: 360
+                )
+                .frame(height: 420)
+                .frame(maxHeight: .infinity, alignment: .top)
+                .ignoresSafeArea(edges: .top)
+            }
             ScrollView(showsIndicators: false) {
                 if isRecommendationRoute {
                     VStack(spacing: 0) {
@@ -180,6 +201,15 @@ struct MusicDiscoveryPage: View {
                         case .album(let title, let artist): albumBanner(title: title, artist: artist)
                         case .musicCategory(let title, let subtitle, let artwork, _):
                             musicCategoryAlbumHeader(title: title, subtitle: subtitle, artwork: artwork)
+                        }
+                        if case .newReleases = route {
+                            HStack(spacing: 10) {
+                                Capsule().fill(MusicXTheme.blue).frame(width: 3, height: 20)
+                                Text("为你推荐")
+                                    .font(.system(size: 20, weight: .bold))
+                                    .foregroundStyle(.white)
+                            }
+                            .padding(.top, 2)
                         }
                         if case .playlists = route {
                             playlistGrid
@@ -339,6 +369,14 @@ struct MusicDiscoveryPage: View {
         .padding(.bottom, 2)
     }
 
+    private var usesPlaylistDetailAtmosphere: Bool {
+        switch route {
+        case .playlistByID, .playlist, .musicCategory, .newReleases:
+            return true
+        default: return false
+        }
+    }
+
     private var isRecommendationPlaylistRoute: Bool {
         if case .playlistByID = route { return true }
         return false
@@ -447,10 +485,136 @@ struct MusicDiscoveryPage: View {
         }
     }
 
+    private func playlistDetailHeader<Cover: View>(
+        title: String,
+        subtitle: String?,
+        countLabel: String,
+        categoryLabel: String?,
+        @ViewBuilder cover: () -> Cover
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 17) {
+            HStack(alignment: .center, spacing: 16) {
+                cover()
+                    .frame(width: 114, height: 114)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(.white.opacity(0.15), lineWidth: 1))
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(title)
+                        .font(.system(size: 21, weight: .bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                        .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let subtitle, !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Color(red: 0.74, green: 0.66, blue: 0.94))
+                            .lineLimit(1)
+                    }
+                    Text(countLabel)
+                        .font(.system(size: 12))
+                        .foregroundStyle(MusicXTheme.muted)
+                        .lineLimit(1)
+                    if let categoryLabel {
+                        Text(categoryLabel)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Color(red: 0.81, green: 0.70, blue: 0.98))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Color(red: 0.45, green: 0.28, blue: 0.70).opacity(0.25), in: Capsule())
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            playlistDetailPlayControls
+        }
+    }
+
+    private var playlistDetailPlayControls: some View {
+        HStack(spacing: 12) {
+            Button {
+                guard let first = songs.first else { return }
+                onQueueChanged(songs)
+                onPlay(first)
+            } label: {
+                Label("播放全部", systemImage: "play.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color(red: 0.06, green: 0.07, blue: 0.16))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 48)
+                    .background(Color(red: 0.90, green: 0.91, blue: 0.98), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(songs.isEmpty)
+
+            Button {
+                guard !songs.isEmpty else { return }
+                let shuffled = songs.shuffled()
+                onQueueChanged(shuffled)
+                onPlay(shuffled[0])
+            } label: {
+                Image(systemName: "shuffle")
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 48, height: 48)
+                    .background(Color(red: 0.14, green: 0.14, blue: 0.29), in: Circle())
+                    .overlay(Circle().stroke(Color(red: 0.37, green: 0.34, blue: 0.62), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .disabled(songs.isEmpty)
+            .accessibilityLabel("随机播放")
+        }
+    }
+
+    private var newReleasesArtwork: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(red: 0.37, green: 0.18, blue: 0.49),
+                         Color(red: 0.13, green: 0.14, blue: 0.39),
+                         Color(red: 0.06, green: 0.08, blue: 0.22)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+            Circle()
+                .fill(Color(red: 0.93, green: 0.36, blue: 0.66).opacity(0.65))
+                .frame(width: 80, height: 80)
+                .blur(radius: 33)
+                .offset(x: -23, y: -28)
+            Circle()
+                .fill(Color(red: 0.12, green: 0.14, blue: 0.34))
+                .frame(width: 92, height: 92)
+                .overlay {
+                    ForEach([0.62, 0.78, 0.91], id: \.self) { scale in
+                        Circle()
+                            .stroke(.white.opacity(0.11), lineWidth: 0.7)
+                            .frame(width: 92 * scale, height: 92 * scale)
+                    }
+                }
+                .overlay {
+                    Circle()
+                        .fill(LinearGradient(
+                            colors: [Color(red: 0.82, green: 0.38, blue: 0.72),
+                                     Color(red: 0.95, green: 0.55, blue: 0.38)],
+                            startPoint: .top, endPoint: .bottom))
+                        .frame(width: 37, height: 37)
+                        .overlay { Circle().fill(Color(red: 0.08, green: 0.09, blue: 0.19)).frame(width: 7, height: 7) }
+                }
+                .shadow(color: .black.opacity(0.4), radius: 6, y: 6)
+            Image(systemName: "music.note")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.white.opacity(0.50))
+                .offset(x: 41, y: -36)
+        }
+        .accessibilityLabel("新歌速递唱片封面")
+    }
+
     private var newReleasesHeader: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("新歌速递").font(.system(size: 28, weight: .bold))
-            Text("MusicX 新歌精选 · 持续更新").font(.system(size: 13)).foregroundStyle(MusicXTheme.muted)
+        playlistDetailHeader(
+            title: "新歌速递",
+            subtitle: "MusicX 新歌精选",
+            countLabel: "持续更新 · \(songs.count) 首",
+            categoryLabel: "新歌推荐"
+        ) {
+            newReleasesArtwork
         }
     }
 
@@ -587,53 +751,15 @@ struct MusicDiscoveryPage: View {
     }
 
     private func musicCategoryAlbumHeader(title: String, subtitle: String, artwork: String) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 16) {
-                Image(artwork)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 136, height: 136)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(.white.opacity(0.16), lineWidth: 1))
-                VStack(alignment: .leading, spacing: 9) {
-                    Text(title).font(.system(size: 23, weight: .bold)).foregroundStyle(.white)
-                    Text(subtitle).font(.system(size: 14, weight: .medium)).foregroundStyle(MusicXTheme.blue)
-                    Text("精选分类 · \(songs.count) 首").font(.system(size: 12)).foregroundStyle(MusicXTheme.muted)
-                }
-                Spacer(minLength: 0)
-            }
-            HStack(spacing: 10) {
-                Button {
-                    guard let first = songs.first else { return }
-                    onQueueChanged(songs)
-                    onPlay(first)
-                } label: {
-                    Label("播放全部", systemImage: "play.fill")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Color(red: 0.035, green: 0.045, blue: 0.11))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 48)
-                        .background(Color(red: 0.94, green: 0.95, blue: 0.99), in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .disabled(songs.isEmpty)
-                Button {
-                    guard !songs.isEmpty else { return }
-                    let shuffled = songs.shuffled()
-                    onQueueChanged(shuffled)
-                    onPlay(shuffled[0])
-                } label: {
-                    Label("随机播放", systemImage: "shuffle")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 48)
-                        .background(Color(red: 0.085, green: 0.105, blue: 0.20), in: Capsule())
-                        .overlay(Capsule().stroke(Color(red: 0.19, green: 0.23, blue: 0.43), lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-                .disabled(songs.isEmpty)
-            }
+        playlistDetailHeader(
+            title: title,
+            subtitle: subtitle,
+            countLabel: "音乐分类 · \(songs.count) 首",
+            categoryLabel: "音乐分类"
+        ) {
+            Image(artwork)
+                .resizable()
+                .scaledToFill()
         }
     }
 
@@ -731,72 +857,26 @@ struct MusicDiscoveryPage: View {
     }
 
     private func recommendationPlaylistBanner(_ playlist: MusicPlaylist) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 16) {
-                AsyncImage(url: playlist.artworkURL) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
-                    } else {
-                        ZStack {
-                            LinearGradient(
-                                colors: [Color(red: 0.24, green: 0.30, blue: 0.58), Color(red: 0.08, green: 0.10, blue: 0.20)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                            Image(systemName: "music.note.list")
-                                .font(.system(size: 42, weight: .light))
-                                .foregroundStyle(.white.opacity(0.65))
-                        }
+        playlistDetailHeader(
+            title: playlist.name,
+            subtitle: nil,
+            countLabel: "共 \(songs.count) 首歌曲",
+            categoryLabel: "精选歌单"
+        ) {
+            AsyncImage(url: playlist.artworkURL) { phase in
+                if let image = phase.image {
+                    image.resizable().scaledToFill()
+                } else {
+                    ZStack {
+                        LinearGradient(
+                            colors: [Color(red: 0.25, green: 0.22, blue: 0.52), Color(red: 0.08, green: 0.10, blue: 0.20)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                        Image(systemName: "music.note.list")
+                            .font(.system(size: 34, weight: .light))
+                            .foregroundStyle(.white.opacity(0.7))
                     }
                 }
-                .frame(width: 134, height: 134)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(.white.opacity(0.16), lineWidth: 1))
-
-                VStack(alignment: .leading, spacing: 9) {
-                    Text(playlist.name)
-                        .font(.system(size: 27, weight: .bold))
-                        .foregroundStyle(.white)
-                        .lineLimit(2)
-                    Text("共 \(songs.count) 首")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(Color(red: 0.69, green: 0.76, blue: 0.94))
-                }
-                Spacer(minLength: 0)
-            }
-
-            HStack(spacing: 10) {
-                Button {
-                    guard let first = songs.first else { return }
-                    onQueueChanged(songs)
-                    onPlay(first)
-                } label: {
-                    Label("播放全部", systemImage: "play.fill")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Color(red: 0.035, green: 0.045, blue: 0.11))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 48)
-                        .background(Color(red: 0.94, green: 0.95, blue: 0.99), in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .disabled(songs.isEmpty)
-
-                Button {
-                    guard !songs.isEmpty else { return }
-                    let shuffledSongs = songs.shuffled()
-                    onQueueChanged(shuffledSongs)
-                    onPlay(shuffledSongs[0])
-                } label: {
-                    Label("随机播放", systemImage: "shuffle")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 48)
-                        .background(Color(red: 0.085, green: 0.105, blue: 0.20), in: Capsule())
-                        .overlay(Capsule().stroke(Color(red: 0.19, green: 0.23, blue: 0.43), lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-                .disabled(songs.isEmpty)
             }
         }
     }

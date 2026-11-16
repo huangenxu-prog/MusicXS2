@@ -624,10 +624,10 @@ struct ContentView: View {
                 .padding(.horizontal, 20)
             } else {
                 VStack(spacing: 5) {
-                    ForEach(0..<min(songs.count, 6), id: \.self) { index in
+                    ForEach(0..<min(songs.count, 5), id: \.self) { index in
                         let song = songs[index]
-                        homeSongRow(song)
-                        if song.id != songs.prefix(6).last?.id {
+                        homeNewMusicRow(song)
+                        if song.id != songs.prefix(5).last?.id {
                             Rectangle().fill(.white.opacity(0.12)).frame(height: 0.5)
                         }
                     }
@@ -1314,6 +1314,32 @@ struct ContentView: View {
             }
             .contentShape(Rectangle())
         }
+    }
+
+    private func homeNewMusicRow(_ song: AppSong) -> some View {
+        Button {
+            selectManually(song)
+        } label: {
+            HStack(spacing: 12) {
+                songArtwork(song.onlineSong, tint: song.tint, size: 44)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(song.title)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1).truncationMode(.tail)
+                    Text(song.artist)
+                        .font(.system(size: 12))
+                        .foregroundStyle(MusicXTheme.muted)
+                        .lineLimit(1).truncationMode(.tail)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                songRowTime(song)
+            }
+            .contentShape(Rectangle())
+            .padding(.vertical, 7)
+        }
+        .buttonStyle(.plain)
     }
 
     private func homeSongRow(_ song: AppSong, artworkName: String? = nil) -> some View {
