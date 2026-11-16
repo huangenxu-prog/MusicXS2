@@ -159,7 +159,19 @@ private struct ImportedLXSourceProvider: MusicResourceProvider {
                 (id, try library.load(id: id))
             }
         }
-        guard !scripts.isEmpty else { return nil }
+        guard !scripts.isEmpty else {
+            MusicSourceDiagnostics.shared.record(
+                event: "lx-imported-inventory", source: song.source.rawValue,
+                provider: identifier, duration: 0, result: "empty",
+                detail: "No imported JS files in this app's ApplicationSupport/LXCustomSources"
+            )
+            return nil
+        }
+        MusicSourceDiagnostics.shared.record(
+            event: "lx-imported-inventory", source: song.source.rawValue,
+            provider: identifier, duration: 0, result: "loaded",
+            detail: "scripts=\(scripts.count); platform=\(platform); track_id_present=\(!song.sourceID.isEmpty)"
+        )
 
         // Each JSContext is confined to the main actor. Network callbacks can
         // complete independently; the first valid URL wins and remaining tasks
@@ -171,10 +183,31 @@ private struct ImportedLXSourceProvider: MusicResourceProvider {
                     do {
                         try Task.checkCancellation()
                         let host = try LXSourceScriptHost(script: script)
-                        guard await host.awaitRegistration(timeout: 8),
-                              let metadata = host.registeredSources[platform] as? [String: Any] else {
+                        let ready = await host.awaitRegistration(timeout: 8)
+                        guard ready else {
+                            MusicSourceDiagnostics.shared.record(
+                                event: "lx-imported-registration", source: song.source.rawValue,
+                                provider: "lx:\(id):\(platform)", duration: 0,
+                                result: "not_ready",
+                                detail: "js_error=\(host.lastError ?? "none")"
+                            )
                             return nil
                         }
+                        guard let metadata = host.registeredSources[platform] as? [String: Any] else {
+                            MusicSourceDiagnostics.shared.record(
+                                event: "lx-imported-registration", source: song.source.rawValue,
+                                provider: "lx:\(id):\(platform)", duration: 0,
+                                result: "unsupported_platform",
+                                detail: "registered=\(host.registeredSources.keys.sorted().joined(separator: ","))"
+                            )
+                            return nil
+                        }
+                        MusicSourceDiagnostics.shared.record(
+                            event: "lx-imported-registration", source: song.source.rawValue,
+                            provider: "lx:\(id):\(platform)", duration: 0,
+                            result: "supported",
+                            detail: "qualities=\((metadata["qualitys"] as? [String] ?? []).joined(separator: ","))"
+                        )
                         let qualities = metadata["qualitys"] as? [String] ?? []
                         let requested = qualities.contains("320k") ? "320k"
                             : (qualities.contains("128k") ? "128k" : (qualities.first ?? "320k"))
