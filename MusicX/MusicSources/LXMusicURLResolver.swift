@@ -264,19 +264,7 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
         // Migu's native search can take up to 12 seconds and its GDStudio
         // fallback can add another 12 seconds, so it must not block results
         // already returned by NetEase, QQ, or Kugou.
-        async let netease = captureSearch {
-            try await MusicXLegacySupplierLibrary(session: session).search(
-                keyword: searchKeyword, source: .netease, page: 1, count: 20,
-                albumOnly: false, useNativeNetEase: true
-            )
-        }
-        async let kuwo = captureSearch { try await searchKuwoNative(keyword: searchKeyword) }
-        async let kugou: ([MusicSong], String?) = ([], nil)
-        async let qq = captureSearch { try await searchQQNative(keyword: searchKeyword) }
-        let primaryResults = await [netease, kuwo, kugou, qq]
-        try Task.checkCancellation()
-
-        var searchFailures = primaryResults.compactMap { $0.1 }
+        var searchFailures: [String] = []
         var candidateFailures: [String] = []
         var seen = Set<String>()
 
@@ -368,22 +356,50 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
             }
         }
 
-        // Prefer the requested recording over a faster live/re-recorded variant.
-        // Alternate editions compete only after all standard-edition URLs fail.
-        let matched = makeCandidates(from: primaryResults.map { $0.0 })
-        if let url = try await resolveCandidates(matched.filter { $0.1 >= 80 }) {
-            return url
+        // Stream search results as they arrive. A slow or unavailable catalog
+        // must not block another platform's already matched playable stream.
+        let searchOperations: [(MusicSource, @Sendable () async -> ([MusicSong], String?))] = [
+            (.netease, {
+                await captureSearch {
+                    try await NetEaseNativeAPIClient(session: session).search(
+                        keyword: searchKeyword, count: 20, offset: 0
+                    )
+                }
+            }),
+            (.kuwo, { await captureSearch { try await searchKuwoNative(keyword: searchKeyword) } }),
+            (.qq, { await captureSearch { try await searchQQNative(keyword: searchKeyword) } })
+        ]
+        var anySongs = false
+        let result = await withTaskGroup(of: ([MusicSong], String?).self, returning: URL?.self) { group in
+            for (_, operation) in searchOperations {
+                group.addTask { await operation() }
+            }
+            while let (songs, failure) = await group.next() {
+                if let failure { searchFailures.append(failure) }
+                if !songs.isEmpty { anySongs = true }
+                let matched = makeCandidates(from: [songs])
+                if let url = try? await resolveCandidates(matched.filter { $0.1 >= 80 }) {
+                    group.cancelAll()
+                    return url
+                }
+                // Alternate editions are a fallback, but must not stall other
+                // catalogs: they are considered only after the standard search
+                // candidates from this completed catalog have been attempted.
+                if let url = try? await resolveCandidates(matched.filter { $0.1 < 80 }) {
+                    group.cancelAll()
+                    return url
+                }
+            }
+            return nil
         }
-        if let url = try await resolveCandidates(matched.filter { $0.1 < 80 }) {
-            return url
-        }
+        if let result { return result }
 
         if !candidateFailures.isEmpty {
             throw MusicSourceError.invalidResponse(
                 "跨平台备用解析异常：" + candidateFailures.joined(separator: "；")
             )
         }
-        if primaryResults.allSatisfy({ $0.0.isEmpty }) && !searchFailures.isEmpty {
+        if !anySongs && !searchFailures.isEmpty {
             throw MusicSourceError.invalidResponse(
                 "跨平台搜索接口异常：" + searchFailures.joined(separator: "；")
             )
