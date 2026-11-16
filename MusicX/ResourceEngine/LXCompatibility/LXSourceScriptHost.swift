@@ -32,6 +32,8 @@ final class LXSourceScriptHost {
     // JSValue callbacks must remain strongly rooted until URLSession completes.
     private var nextHTTPID = 0
     private var pendingHTTPCallbacks: [Int: JSValue] = [:]
+    private var nextTimerID = 0
+    private var pendingTimers: [Int: (callback: JSValue, task: Task<Void, Never>)] = [:]
     private var completions: [Int: (Result<String, Error>) -> Void] = [:]
     private var timeoutTasks: [Int: Task<Void, Never>] = [:]
 
@@ -74,6 +76,25 @@ final class LXSourceScriptHost {
         context.setObject(script, forKeyedSubscript: "__lxRawScript" as NSString)
         context.setObject(scriptVersion, forKeyedSubscript: "__lxScriptVersion" as NSString)
         context.setObject(md5, forKeyedSubscript: "__lxMD5" as NSString)
+        let scheduleTimer: @convention(block) (JSValue, Double) -> Int = { [weak self] callback, delay in
+            guard let self else { return -1 }
+            self.nextTimerID += 1
+            let timerID = self.nextTimerID
+            let milliseconds = min(max(delay.isFinite ? delay : 0, 0), 60_000)
+            let task = Task { @MainActor [weak self] in
+                do { try await Task.sleep(for: .milliseconds(Int(milliseconds))) }
+                catch { return }
+                guard let self, let entry = self.pendingTimers.removeValue(forKey: timerID) else { return }
+                entry.callback.call(withArguments: [])
+            }
+            self.pendingTimers[timerID] = (callback, task)
+            return timerID
+        }
+        let cancelTimer: @convention(block) (Int) -> Void = { [weak self] id in
+            self?.pendingTimers.removeValue(forKey: id)?.task.cancel()
+        }
+        context.setObject(scheduleTimer, forKeyedSubscript: "__lxSetTimeout" as NSString)
+        context.setObject(cancelTimer, forKeyedSubscript: "__lxClearTimeout" as NSString)
         context.setObject(network, forKeyedSubscript: "__lxHTTP" as NSString)
         context.setObject(complete, forKeyedSubscript: "__lxComplete" as NSString)
         context.setObject(registration, forKeyedSubscript: "__lxSend" as NSString)
@@ -198,6 +219,11 @@ final class LXSourceScriptHost {
     private static let bootstrap = #"""
     (function () {
       const handlers = {};
+      globalThis.setTimeout = function (callback, delay) {
+        if (typeof callback !== 'function') throw new TypeError('setTimeout callback must be a function');
+        return __lxSetTimeout(callback, Number(delay) || 0);
+      };
+      globalThis.clearTimeout = function (id) { __lxClearTimeout(Number(id) || 0); };
       const EVENTS = { request: 'request', inited: 'inited',
                        updateAlert: 'updateAlert' };
       globalThis.lx = {
