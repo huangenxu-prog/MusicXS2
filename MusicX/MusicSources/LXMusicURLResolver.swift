@@ -168,9 +168,9 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
 
     /// QQ native endpoints are now independent resource-engine providers.
     /// This entry point keeps only the cross-platform fallback inside the legacy adapter.
-    func resolveCrossPlatformFallback(song: MusicSong, quality: MusicQuality) async throws -> URL? {
+    func resolveCrossPlatformFallback(song: MusicSong, quality: MusicQuality, excludedURLIDs: Set<String> = []) async throws -> URL? {
         try Task.checkCancellation()
-        return try await resolveAlternativeSource(song: song, quality: quality)
+        return try await resolveAlternativeSource(song: song, quality: quality, excludedURLIDs: excludedURLIDs)
     }
 
     /// Resolve only the source-native ID. IDs are never passed between providers.
@@ -257,7 +257,7 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
 
     /// Search other platforms after native resolution fails. A normalized title
     /// and artist match is sufficient; duration and album metadata are ignored.
-    private func resolveAlternativeSource(song: MusicSong, quality: MusicQuality) async throws -> URL? {
+    private func resolveAlternativeSource(song: MusicSong, quality: MusicQuality, excludedURLIDs: Set<String> = []) async throws -> URL? {
         let service = GDStudioMusicSearchService(session: session)
         let searchKeyword = AudioSourceTrackMatcher.searchTitle(song.title)
 
@@ -340,6 +340,7 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
                                 return nil
                             }
                             guard let url else { return (nil, nil) }
+                            guard !excludedURLIDs.contains(Self.fallbackURLID(url)) else { return (nil, nil) }
                             MusicSourceDiagnostics.shared.record(
                                 event: "resolve-fallback", source: song.source.rawValue,
                                 provider: candidate.source.rawValue, duration: 0,
@@ -398,6 +399,15 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
             )
         }
         return nil
+    }
+
+    /// Stable URL identity used to exclude only the stream rejected by AVPlayer,
+    /// without disabling other scripts or catalogs in cross-platform fallback.
+    static func fallbackURLID(_ url: URL) -> String {
+        let hash = url.absoluteString.utf8.reduce(UInt64(14695981039346656037)) {
+            ($0 ^ UInt64($1)) &* UInt64(1099511628211)
+        }
+        return "cross-platform-url:" + String(hash, radix: 16)
     }
 
     private func captureSearch(
