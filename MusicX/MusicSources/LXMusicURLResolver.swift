@@ -307,7 +307,7 @@ struct LXMusicURLResolver: MusicURLResolving, @unchecked Sendable {
                             // Native URL suppliers and every imported LX script
                             // for this matched platform race as independent paths.
                             // The matched platform's ID is passed to its own JS.
-                            let url = await withTaskGroup(of: URL?.self) { paths in
+                            let url: URL? = await withTaskGroup(of: URL?.self, returning: URL?.self) { paths in
                                 paths.addTask {
                                     try? await resolveNative(song: candidate, quality: quality)
                                 }
