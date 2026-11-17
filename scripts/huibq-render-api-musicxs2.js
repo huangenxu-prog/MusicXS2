@@ -50,7 +50,7 @@ const handleGetMusicUrl = async (source, musicInfo, quality) => {
   const code = Number(body.code)
   switch (code) {
     case 0:
-      if (typeof body.url !== 'string' || !/^https?:\\/\\//i.test(body.url)) throw new Error('Huibq返回成功但缺少有效播放URL')
+      if (typeof body.url !== 'string' || !body.url.startsWith('https://') && !body.url.startsWith('http://')) throw new Error('Huibq返回成功但缺少有效播放URL')
       return body.url
     case 1:
       throw new Error('block ip')
