@@ -344,7 +344,11 @@ final class LXSourceScriptHost {
         log: function () { __lxLog('log', Array.from(arguments).map(String).join(' ')); },
         warn: function () { __lxLog('warn', Array.from(arguments).map(String).join(' ')); },
         error: function () { __lxLog('error', Array.from(arguments).map(String).join(' ')); },
-        info: function () { __lxLog('info', Array.from(arguments).map(String).join(' ')); }
+        info: function () { __lxLog('info', Array.from(arguments).map(String).join(' ')); },
+        debug: function () { __lxLog('debug', Array.from(arguments).map(String).join(' ')); },
+        group: function () { __lxLog('group', Array.from(arguments).map(String).join(' ')); },
+        groupCollapsed: function () { __lxLog('group', Array.from(arguments).map(String).join(' ')); },
+        groupEnd: function () {}
       };
       globalThis.setTimeout = function (callback, delay) {
         if (typeof callback !== 'function') throw new TypeError('setTimeout callback must be a function');
