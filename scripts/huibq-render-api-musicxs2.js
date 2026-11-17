@@ -35,10 +35,22 @@ const handleGetMusicUrl = async (source, musicInfo, quality) => {
       'X-Request-Key': API_KEY,
     },
   })
-  const { body } = request
-  if (!body || isNaN(Number(body.code))) throw new Error('unknow error')
-  switch (body.code) {
+  const status = Number(request?.statusCode || 0)
+  let body = request?.body
+  if (typeof body === 'string') {
+    try { body = JSON.parse(body.trim()) } catch (_) {
+      const preview = body.replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, 130)
+      throw new Error(`Huibq响应不是JSON (HTTP ${status}): ${preview || '空响应'}`)
+    }
+  }
+  if (!body || typeof body !== 'object' || body.code === undefined || body.code === null || !Number.isFinite(Number(body.code))) {
+    const keys = body && typeof body === 'object' ? Object.keys(body).slice(0, 12).join(',') : 'none'
+    throw new Error(`Huibq响应格式异常 (HTTP ${status}, keys=${keys})`)
+  }
+  const code = Number(body.code)
+  switch (code) {
     case 0:
+      if (typeof body.url !== 'string' || !/^https?:\\/\\//i.test(body.url)) throw new Error('Huibq返回成功但缺少有效播放URL')
       return body.url
     case 1:
       throw new Error('block ip')
@@ -51,7 +63,7 @@ const handleGetMusicUrl = async (source, musicInfo, quality) => {
     case 6:
       throw new Error('param error')
     default:
-      throw new Error(body.msg ?? 'unknow error')
+      throw new Error(`Huibq接口错误 (HTTP ${status}, code=${code}): ${String(body.msg || '无错误说明').slice(0, 120)}`)
   }
 }
 const musicSources = {}
