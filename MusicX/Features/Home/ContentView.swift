@@ -1240,7 +1240,7 @@ struct ContentView: View {
                                 HStack(spacing: 12) {
                                     songArtwork(song.onlineSong, tint: song.tint, size: 48)
                                         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                    Button { selectManually(song) } label: {
+                                    Button { playLibrarySong(song) } label: {
                                         VStack(alignment: .leading, spacing: 5) {
                                             Text(song.title)
                                                 .font(.system(size: 15, weight: .semibold))
@@ -1262,7 +1262,7 @@ struct ContentView: View {
                                             .frame(width: 30, height: 48)
                                     }
                                     .buttonStyle(.plain)
-                                    Button { selectManually(song) } label: {
+                                    Button { playLibrarySong(song) } label: {
                                         Image(systemName: currentSong?.id == song.id && playerStore.isPlaying ? "pause.circle" : "play.circle")
                                             .font(.system(size: 25, weight: .regular))
                                             .foregroundStyle(.white.opacity(0.92))
@@ -2399,6 +2399,15 @@ struct ContentView: View {
         guard let song = currentSong, !isResolvingSong else { return }
         if restoredPosition != nil { select(song) }
         else { playerStore.togglePlayback() }
+    }
+
+    private func playLibrarySong(_ song: AppSong) {
+        // Match the Home favorites playlist: play within the visible library
+        // collection rather than inheriting an unrelated playback queue.
+        playbackQueueSongs = librarySongs
+        hasCustomPlaybackQueue = true
+        if currentSong?.id != song.id { resetShuffleHistory() }
+        select(song)
     }
 
     private func selectManually(_ song: AppSong) {
