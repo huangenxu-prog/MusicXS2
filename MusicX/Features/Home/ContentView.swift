@@ -1238,8 +1238,11 @@ struct ContentView: View {
                         VStack(spacing: 3) {
                             ForEach(librarySongs) { song in
                                 HStack(spacing: 12) {
-                                    songArtwork(song.onlineSong, tint: song.tint, size: 48)
-                                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    Button { playLibrarySong(song) } label: {
+                                        songArtwork(song.onlineSong, tint: song.tint, size: 48)
+                                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    }
+                                    .buttonStyle(.plain)
                                     Button { playLibrarySong(song) } label: {
                                         VStack(alignment: .leading, spacing: 5) {
                                             Text(song.title)
