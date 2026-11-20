@@ -24,10 +24,18 @@ final class QueueUITests: XCTestCase {
         app.buttons[favorites ? "收藏歌曲" : "最近播放"].tap()
         XCTAssertTrue(app.staticTexts["27 首"].waitForExistence(timeout: 8))
         let row = app.buttons["library-title-7"]
-        for _ in 0..<5 where !row.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        let scroll = app.scrollViews.firstMatch
+        for _ in 0..<12 {
+            if row.exists && row.frame.midY < app.frame.height * 0.70 && row.frame.midY > 80 { break }
+            scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.64))
+                .press(forDuration: 0.12, thenDragTo: scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.48)), withVelocity: .slow, thenHoldForDuration: 0)
+        }
         row.tap()
-        app.buttons["mini-open-player"].tap()
-        app.buttons["播放队列"].firstMatch.tap()
+        let mini = app.buttons["mini-open-player"]
+        XCTAssertTrue(mini.label.contains("FixtureTrack-8"), app.debugDescription)
+        mini.tap()
+        XCTAssertTrue(app.staticTexts["正在播放"].waitForExistence(timeout: 5), app.debugDescription)
+        app.descendants(matching: .any).matching(identifier: "播放队列").firstMatch.tap()
         if !favorites {
             XCTAssertTrue(app.staticTexts["播放队列为空"].waitForExistence(timeout: 5), app.debugDescription)
             return
