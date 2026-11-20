@@ -2407,7 +2407,11 @@ struct ContentView: View {
     private func playLibrarySong(_ song: AppSong) {
         // Match the Home favorites playlist: play within the visible library
         // collection rather than inheriting an unrelated playback queue.
-        playbackQueueSongs = librarySongs
+        // Start the queue at the selected row, preserving the visible order.
+        // Do not include tracks preceding the selected song.
+        let items = librarySongs
+        guard let selectedIndex = items.firstIndex(where: { $0.id == song.id }) else { return }
+        playbackQueueSongs = Array(items[selectedIndex...])
         hasCustomPlaybackQueue = true
         if currentSong?.id != song.id { resetShuffleHistory() }
         select(song)
