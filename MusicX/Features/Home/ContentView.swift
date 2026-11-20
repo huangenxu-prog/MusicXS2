@@ -1205,6 +1205,7 @@ struct ContentView: View {
                 }
 
                 if libraryContentType == .songs {
+                    let displayedSongs = librarySongs
                     HStack(spacing: 9) {
                         ForEach(LibraryFilter.allCases, id: \.self) { filter in
                             Button {
@@ -1221,13 +1222,13 @@ struct ContentView: View {
                             .buttonStyle(.plain)
                         }
                         Spacer()
-                        Text("\(librarySongs.count) 首")
+                        Text("\(displayedSongs.count) 首")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(MusicXTheme.muted)
                     }
                     .padding(.top, 2)
 
-                    if librarySongs.isEmpty {
+                    if displayedSongs.isEmpty {
                         emptyState(
                             icon: libraryFilter == .favorites ? "heart" : "clock.arrow.circlepath",
                             title: libraryFilter == .favorites ? "还没有收藏歌曲" : "暂无最近播放",
@@ -1236,14 +1237,14 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity, minHeight: 300)
                     } else {
                         VStack(spacing: 3) {
-                            ForEach(librarySongs) { song in
+                            ForEach(Array(displayedSongs.enumerated()), id: \.element.id) { index, song in
                                 HStack(spacing: 12) {
-                                    Button { playLibrarySong(song) } label: {
+                                    Button { playLibrarySong(in: displayedSongs, at: index) } label: {
                                         songArtwork(song.onlineSong, tint: song.tint, size: 48)
                                             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                                     }
                                     .buttonStyle(.plain)
-                                    Button { playLibrarySong(song) } label: {
+                                    Button { playLibrarySong(in: displayedSongs, at: index) } label: {
                                         VStack(alignment: .leading, spacing: 5) {
                                             Text(song.title)
                                                 .font(.system(size: 15, weight: .semibold))
@@ -1265,7 +1266,7 @@ struct ContentView: View {
                                             .frame(width: 30, height: 48)
                                     }
                                     .buttonStyle(.plain)
-                                    Button { playLibrarySong(song) } label: {
+                                    Button { playLibrarySong(in: displayedSongs, at: index) } label: {
                                         Image(systemName: currentSong?.id == song.id && playerStore.isPlaying ? "pause.circle" : "play.circle")
                                             .font(.system(size: 25, weight: .regular))
                                             .foregroundStyle(.white.opacity(0.92))
@@ -2280,9 +2281,9 @@ struct ContentView: View {
             selectRandomNextTrack(from: queue)
             return
         }
-        let nextIndex = index + 1
-        if queue.indices.contains(nextIndex) { select(queue[nextIndex]) }
-        else if repeatMode == 1, let first = queue.first { select(first) }
+        if let next = LibraryQueue.successor(in: queue, after: index, loops: repeatMode == 1) {
+            select(next)
+        }
     }
 
     private func resetShuffleHistory() {
@@ -2404,17 +2405,15 @@ struct ContentView: View {
         else { playerStore.togglePlayback() }
     }
 
-    private func playLibrarySong(_ song: AppSong) {
-        // Match the Home favorites playlist: play within the visible library
-        // collection rather than inheriting an unrelated playback queue.
-        // Start the queue at the selected row, preserving the visible order.
-        // Do not include tracks preceding the selected song.
-        let items = librarySongs
-        guard let selectedIndex = items.firstIndex(where: { $0.id == song.id }) else { return }
-        playbackQueueSongs = Array(items[selectedIndex...])
+    private func playLibrarySong(in displayed: [AppSong], at index: Int) {
+        let queue = LibraryQueue.selection(in: displayed, at: index)
+        guard let first = queue.first else { return }
+        playbackQueueSongs = queue
         hasCustomPlaybackQueue = true
-        if currentSong?.id != song.id { resetShuffleHistory() }
-        select(song)
+        resetShuffleHistory()
+        if currentSong?.id == first.id && (playerStore.isPlaying || isResolvingSong)
+            && playerStore.errorMessage == nil && restoredPosition == nil { return }
+        select(first)
     }
 
     private func selectManually(_ song: AppSong) {
