@@ -40,4 +40,4 @@ targets:
         INFOPLIST_KEY_UILaunchStoryboardName: LaunchScreen
         SWIFT_EMIT_LOC_STRINGS: YES
         TARGETED_DEVICE_FAMILY: "1"
-# Build 339: restore approved home design reference; fix library favorites auto-advance.
+# Build 339: restore approved home design reference; fix library favorites queue and artwork tap.
