@@ -1259,6 +1259,7 @@ struct ContentView: View {
                                         .contentShape(Rectangle())
                                     }
                                     .buttonStyle(.plain)
+                                    .accessibilityIdentifier("library-title-\(index)")
                                     Button { toggleFavorite(song) } label: {
                                         Image(systemName: favorites.contains(song.id) ? "heart.fill" : "heart")
                                             .font(.system(size: 19, weight: .medium))
@@ -1634,6 +1635,7 @@ struct ContentView: View {
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
             }.buttonStyle(.plain)
+            .accessibilityIdentifier("mini-open-player")
             Button { stepSong(by: -1) } label: {
                 Image(systemName: "backward.end.fill").font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.92)).frame(width: 30, height: 46)
@@ -1976,6 +1978,7 @@ struct ContentView: View {
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityIdentifier("queue-row-\(song.title)")
                                 Button { removeFromQueue(song) } label: {
                                     Image(systemName: "xmark")
                                         .font(.system(size: 11, weight: .semibold))

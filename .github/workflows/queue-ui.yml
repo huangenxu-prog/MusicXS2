@@ -1,0 +1,20 @@
+name: Library queue UI reproduction
+on:
+  push:
+    branches: [diagnostics/library-queue-ui]
+jobs:
+  test:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen && xcodegen generate
+      - name: Exercise both installed-app library lists
+        run: |
+          id=$(xcrun simctl list devices available -j | python3 -c 'import json,sys;print(next(d["udid"] for k,ds in json.load(sys.stdin)["devices"].items() if ".iOS-" in k for d in ds if d["name"].startswith("iPhone")))')
+          xcodebuild test -scheme MusicX -destination "platform=iOS Simulator,id=$id" -parallel-testing-enabled NO -resultBundlePath QueueTests.xcresult CODE_SIGNING_ALLOWED=NO
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: QueueTests
+          path: QueueTests.xcresult

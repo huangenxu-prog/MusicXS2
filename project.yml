@@ -41,3 +41,21 @@ targets:
         SWIFT_EMIT_LOC_STRINGS: YES
         TARGETED_DEVICE_FAMILY: "1"
 # Build 340: library favorites/recent queue starts at selected track; preserve approved UI.
+  QueueUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [QueueUITests]
+    dependencies:
+      - target: MusicX
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.huangenxu.musicx.queueuitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: MusicX
+schemes:
+  MusicX:
+    build:
+      targets:
+        MusicX: all
+    test:
+      targets: [QueueUITests]
