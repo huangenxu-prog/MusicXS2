@@ -16,8 +16,9 @@ final class QueueUITests: XCTestCase {
             return String(hash & 0x7fffffffffffffff)
         }.joined(separator: ",")
         let kind = favorites ? "favorite" : "recent"
-        app.launchArguments = ["-musicx.\(kind)Songs", String(decoding: json, as: UTF8.self),
-                               "-musicx.\(kind)IDs", ids]
+        app.launchEnvironment["QUEUE_TEST_KIND"] = kind
+        app.launchEnvironment["QUEUE_TEST_SONGS"] = json.base64EncodedString()
+        app.launchEnvironment["QUEUE_TEST_IDS"] = ids
         app.launch()
         app.buttons["音乐库"].tap()
         app.buttons[favorites ? "收藏歌曲" : "最近播放"].tap()
@@ -27,9 +28,13 @@ final class QueueUITests: XCTestCase {
         row.tap()
         app.buttons["mini-open-player"].tap()
         app.buttons["播放队列"].firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["20 首"].waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(app.buttons["queue-row-FixtureTrack-8"].exists)
-        XCTAssertTrue(app.buttons["queue-row-FixtureTrack-9"].exists)
-        XCTAssertFalse(app.buttons["queue-row-FixtureTrack-7"].exists)
+        if !favorites {
+            XCTAssertTrue(app.staticTexts["播放队列为空"].waitForExistence(timeout: 5), app.debugDescription)
+            return
+        }
+        XCTAssertTrue(app.staticTexts["27 首"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.buttons["queue-row-FixtureTrack-1"].exists)
+        XCTAssertTrue(app.buttons["queue-row-FixtureTrack-2"].exists)
+        XCTAssertTrue(app.staticTexts["FixtureTrack-8"].exists)
     }
 }

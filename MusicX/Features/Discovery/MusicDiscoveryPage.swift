@@ -55,6 +55,7 @@ struct MusicDiscoveryPage: View {
     let onNext: () -> Void
     let onOpenQueue: () -> Void
     let onQueueChanged: ([MusicSong]) -> Void
+    let onPlayCollectionTrack: (MusicSong, [MusicSong]) -> Void
     let currentTime: TimeInterval
     let duration: TimeInterval
     let onOpenPlaylist: (MusicPlaylist) -> Void
@@ -1635,8 +1636,7 @@ struct MusicDiscoveryPage: View {
                 ForEach(Array(songs.enumerated()), id: \.element.id) { index, song in
                     let isCurrent = currentSong?.id == song.id
                     Button {
-                        onQueueChanged(songs)
-                        onPlay(song)
+                        onPlayCollectionTrack(song, songs)
                     } label: {
                         if isRecommendationPlaylistRoute {
                             HStack(spacing: 14) {

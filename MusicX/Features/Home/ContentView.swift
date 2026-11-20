@@ -480,14 +480,8 @@ struct ContentView: View {
                 onPrevious: { stepSong(by: -1) },
                 onNext: { stepSong(by: 1) },
                 onOpenQueue: { playerDisplayMode = .queue; isPlayerPresented = true },
-                onQueueChanged: {
-                    playbackQueueSongs = $0.map {
-                        AppSong(id: stableSongID($0), title: $0.title, artist: $0.artist,
-                                album: $0.album ?? "", tint: MusicXTheme.blue, onlineSong: $0)
-                    }
-                    hasCustomPlaybackQueue = true
-                    resetShuffleHistory()
-                },
+                onQueueChanged: installDiscoveryQueue,
+                onPlayCollectionTrack: playCollectionTrack,
                 currentTime: playerStore.currentTime,
                 duration: playerStore.duration,
                 onOpenPlaylist: { playlistID in
@@ -2078,6 +2072,7 @@ struct ContentView: View {
     }
 
     private var playbackQueue: [AppSong] {
+        if hasCustomPlaybackQueue && playbackQueueSongs.isEmpty { return [] }
         var items = hasCustomPlaybackQueue ? playbackQueueSongs : (songs + onlineResults)
         if let currentSong, !items.contains(where: { $0.id == currentSong.id }) {
             items.insert(currentSong, at: 0)
@@ -2273,7 +2268,7 @@ struct ContentView: View {
     }
 
     private func playNextAfterNaturalFinish() {
-        guard let currentSong else { return }
+        guard !playbackQueue.isEmpty, let currentSong else { return }
         if repeatMode == 2 {
             playerStore.replayCurrentTrack()
             return
@@ -2408,15 +2403,28 @@ struct ContentView: View {
         else { playerStore.togglePlayback() }
     }
 
-    private func playLibrarySong(in displayed: [AppSong], at index: Int) {
-        let queue = LibraryQueue.selection(in: displayed, at: index)
-        guard let first = queue.first else { return }
-        playbackQueueSongs = queue
+    private func installDiscoveryQueue(_ tracks: [MusicSong]) {
+        playbackQueueSongs = tracks.map { appSong(from: $0) }
         hasCustomPlaybackQueue = true
         resetShuffleHistory()
-        if currentSong?.id == first.id && (playerStore.isPlaying || isResolvingSong)
+    }
+
+    private func playCollectionTrack(_ song: MusicSong, in tracks: [MusicSong]) {
+        installDiscoveryQueue(tracks)
+        playDiscoverySong(song)
+    }
+
+    private func playLibrarySong(in displayed: [AppSong], at index: Int) {
+        let song = displayed[index]
+        if libraryFilter == .favorites, let track = song.onlineSong {
+            playCollectionTrack(track, in: displayed.compactMap(\.onlineSong))
+            return
+        }
+        // An explicitly empty queue represents standalone playback.
+        installDiscoveryQueue([])
+        if currentSong?.id == song.id && (playerStore.isPlaying || isResolvingSong)
             && playerStore.errorMessage == nil && restoredPosition == nil { return }
-        select(first)
+        select(song)
     }
 
     private func selectManually(_ song: AppSong) {
