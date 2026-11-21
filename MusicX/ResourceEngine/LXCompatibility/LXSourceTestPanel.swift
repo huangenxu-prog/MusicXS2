@@ -249,7 +249,6 @@ struct LXSourceTestPanel: View {
     }
 
     @MainActor
-    @MainActor
     private func syncCloudSources() async {
         guard !isSyncingSources else { return }
         isSyncingSources = true
