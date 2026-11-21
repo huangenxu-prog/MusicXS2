@@ -1140,6 +1140,17 @@ struct ContentView: View {
                         } label: {
                             Label("恢复音乐收藏", systemImage: "square.and.arrow.down")
                         }
+                        Button("粘贴备份恢复收藏") {
+                            Task { @MainActor in
+                                do {
+                                    let data = try await BackupClipboard.read()
+                                    try restoreMusicBackup(data)
+                                } catch {
+                                    backupNotice = "恢复失败：\(error.localizedDescription)"
+                                    isBackupNoticePresented = true
+                                }
+                            }
+                        }
                     } label: {
                         Image(systemName: "ellipsis")
                             .font(.system(size: 21, weight: .semibold))

@@ -114,6 +114,16 @@ struct LXSourceTestPanel: View {
                         .font(.caption).foregroundStyle(.secondary)
                     Button("备份音源与启用设置") { exportSourceBackup() }
                     Button("从备份恢复音源与设置") { isSourceBackupImporterPresented = true }
+                    Button("粘贴备份恢复音源与设置") {
+                        Task { @MainActor in
+                            do {
+                                let data = try await BackupClipboard.read()
+                                try restoreSourceData(data)
+                            } catch {
+                                message = "音源备份恢复失败：\(error.localizedDescription)"
+                            }
+                        }
+                    }
                     Text("备份包含导入的 JS 源码及平台勾选状态，请妥善保存；恢复不会删除现有音源。")
                         .font(.caption2).foregroundStyle(.secondary)
                     Button("从文件导入 .js 音源") { isImporterPresented = true }
@@ -216,9 +226,7 @@ struct LXSourceTestPanel: View {
                     let granted = url.startAccessingSecurityScopedResource()
                     defer { if granted { url.stopAccessingSecurityScopedResource() } }
                     let data = try Data(contentsOf: url)
-                    let count = try getLibrary().restoreSourceArchive(data)
-                    reload()
-                    message = "已从备份恢复 \(count) 条导入音源及各平台勾选设置；未删除原有其他音源。"
+                    try restoreSourceData(data)
                 } catch {
                     message = "音源备份恢复失败：\(error.localizedDescription)"
                 }
@@ -246,6 +254,12 @@ struct LXSourceTestPanel: View {
     }
 
     @MainActor
+    private func restoreSourceData(_ data: Data) throws {
+        let count = try getLibrary().restoreSourceArchive(data)
+        reload()
+        message = "已从备份恢复 \(count) 条导入音源及各平台勾选设置；未删除原有其他音源。"
+    }
+
     private func exportSourceBackup() {
         do {
             sourceBackupDocument = LXSourceBackupDocument(contents: try getLibrary().exportSourceArchive())
