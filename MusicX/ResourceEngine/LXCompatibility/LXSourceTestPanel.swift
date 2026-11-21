@@ -30,6 +30,7 @@ struct LXSourceTestPanel: View {
     @State private var sourceBackupDocument: LXSourceBackupDocument?
     @State private var isURLImporterPresented = false
     @State private var remoteScriptURL = ""
+    @State private var isSyncingSources = false
     @State private var isImportingRemote = false
     @State private var importedIDs: [String] = []
     @State private var expandedID: String?
@@ -114,16 +115,10 @@ struct LXSourceTestPanel: View {
                         .font(.caption).foregroundStyle(.secondary)
                     Button("备份音源与启用设置") { exportSourceBackup() }
                     Button("从备份恢复音源与设置") { isSourceBackupImporterPresented = true }
-                    Button("粘贴备份恢复音源与设置") {
-                        Task { @MainActor in
-                            do {
-                                let data = try await BackupClipboard.read()
-                                try restoreSourceData(data)
-                            } catch {
-                                message = "音源备份恢复失败：\(error.localizedDescription)"
-                            }
-                        }
+                    Button(isSyncingSources ? "正在同步音源…" : "云端同步音源") {
+                        Task { await syncCloudSources() }
                     }
+                    .disabled(isSyncingSources)
                     Text("备份包含导入的 JS 源码及平台勾选状态，请妥善保存；恢复不会删除现有音源。")
                         .font(.caption2).foregroundStyle(.secondary)
                     Button("从文件导入 .js 音源") { isImporterPresented = true }
@@ -254,6 +249,27 @@ struct LXSourceTestPanel: View {
     }
 
     @MainActor
+    @MainActor
+    private func syncCloudSources() async {
+        guard !isSyncingSources else { return }
+        isSyncingSources = true
+        defer { isSyncingSources = false }
+        do {
+            let url = URL(string: "https://raw.githubusercontent.com/huangenxu-prog/MusicXS2/test/build-486-complete-source/MusicX/CloudSources.json")!
+            let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                throw URLError(.badServerResponse)
+            }
+            let library = try getLibrary()
+            let count = try library.restoreSourceArchive(data, replaceImported: true)
+            reload()
+            message = "已同步 \(count) 个导入音源，并更新内置音源的平台勾选。"
+        } catch {
+            message = "云端同步失败：\(error.localizedDescription)"
+        }
+    }
+
     private func restoreSourceData(_ data: Data) throws {
         let count = try getLibrary().restoreSourceArchive(data)
         reload()

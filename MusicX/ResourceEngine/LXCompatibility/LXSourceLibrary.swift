@@ -153,7 +153,7 @@ final class LXSourceLibrary {
 
     /// Merge an archive without deleting any existing source. Restore the
     /// archived UUID, name and platform switches so duplicates are not created.
-    func restoreSourceArchive(_ data: Data) throws -> Int {
+    func restoreSourceArchive(_ data: Data, replaceImported: Bool = false) throws -> Int {
         guard data.count <= 30 * 1024 * 1024 else { throw LibraryError.tooLarge }
         let archive = try JSONDecoder().decode(SourceArchive.self, from: data)
         guard archive.version == 1, archive.imported.count <= 100 else {
@@ -175,6 +175,9 @@ final class LXSourceLibrary {
             Set($0).isSubset(of: Self.playbackPlatforms)
         }) else { throw LibraryError.invalidFile }
 
+        let staleIDs = replaceImported ? try listIdentifiers().filter {
+            !isBundled(id: $0) && !seen.contains($0.lowercased())
+        } : []
         for item in archive.imported {
             let id = item.id.lowercased()
             try Data(item.script.utf8).write(
@@ -196,6 +199,7 @@ final class LXSourceLibrary {
         }
         UserDefaults.standard.set(approved.sorted(), forKey: approvedKey)
         platformOverrides = overrides
+        for id in staleIDs { try remove(id: id) }
         return archive.imported.count
     }
 
