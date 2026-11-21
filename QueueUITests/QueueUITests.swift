@@ -20,10 +20,17 @@ final class QueueUITests: XCTestCase {
         app.launchEnvironment["QUEUE_TEST_SONGS"] = json.base64EncodedString()
         app.launchEnvironment["QUEUE_TEST_IDS"] = ids
         app.launch()
+        XCTAssertTrue(app.buttons["mini-open-player"].label.contains("Previous session"), app.debugDescription)
         app.buttons["音乐库"].tap()
+        try selectAndCheck(!favorites, app: app)
+        app.buttons["queue-test-close-player"].tap()
+        try selectAndCheck(favorites, app: app)
+    }
+
+    private func selectAndCheck(_ favorites: Bool, app: XCUIApplication) throws {
         app.buttons[favorites ? "收藏歌曲" : "最近播放"].tap()
-        XCTAssertTrue(app.staticTexts["27 首"].waitForExistence(timeout: 8))
-        let row = app.buttons["library-title-7"]
+
+        let row = app.buttons[favorites ? "library-test-play-FixtureTrack-8" : "library-test-cover-FixtureTrack-9"]
         let scroll = app.scrollViews.firstMatch
         for _ in 0..<12 {
             if row.exists && row.frame.midY < app.frame.height * 0.70 && row.frame.midY > 80 { break }
@@ -32,7 +39,7 @@ final class QueueUITests: XCTestCase {
         }
         row.tap()
         let mini = app.buttons["mini-open-player"]
-        XCTAssertTrue(mini.label.contains("FixtureTrack-8"), app.debugDescription)
+        XCTAssertTrue(mini.label.contains(favorites ? "FixtureTrack-8" : "FixtureTrack-9"), app.debugDescription)
         mini.tap()
         XCTAssertTrue(app.staticTexts["正在播放"].waitForExistence(timeout: 5), app.debugDescription)
         app.descendants(matching: .any).matching(identifier: "播放队列").firstMatch.tap()

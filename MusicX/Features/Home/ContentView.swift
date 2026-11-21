@@ -1238,6 +1238,7 @@ struct ContentView: View {
                                             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                                     }
                                     .buttonStyle(.plain)
+                                    .accessibilityIdentifier("library-test-cover-\(song.title)")
                                     Button { playLibrarySong(in: displayedSongs, at: index) } label: {
                                         VStack(alignment: .leading, spacing: 5) {
                                             Text(song.title)
@@ -1268,6 +1269,7 @@ struct ContentView: View {
                                             .frame(width: 34, height: 48)
                                     }
                                     .buttonStyle(.plain)
+                                    .accessibilityIdentifier("library-test-play-\(song.title)")
                                 }
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 8)
@@ -1684,6 +1686,7 @@ struct ContentView: View {
                             Image(systemName: "chevron.down")
                                 .font(.system(size: 19, weight: .semibold))
                         }
+                        .accessibilityIdentifier("queue-test-close-player")
                         Spacer()
                         Text("正在播放").font(.system(size: 18, weight: .semibold))
                         Spacer()
