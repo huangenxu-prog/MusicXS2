@@ -154,6 +154,8 @@ struct ContentView: View {
     @State private var seekPreviewTime: TimeInterval = 0
     @StateObject private var playerStore = PlayerStore()
     @State private var onlineResults: [AppSong] = []
+    @State private var searchResultsBySource: [MusicSource: [AppSong]] = [:]
+    @State private var searchErrorsBySource: [MusicSource: String] = [:]
     @State private var isSearching = false
     @State private var searchRequestID = UUID()
     @State private var searchError: String?
@@ -743,6 +745,10 @@ struct ContentView: View {
         case .search:
             MXLightSearch(
                 searchText: $searchText, songs: filteredSongs.map(lightSong),
+                qqSongs: (searchResultsBySource[.qq] ?? []).map(lightSong),
+                neteaseSongs: (searchResultsBySource[.netease] ?? []).map(lightSong),
+                qqError: searchErrorsBySource[.qq],
+                neteaseError: searchErrorsBySource[.netease],
                 playlists: lightSearchPlaylistResults.map(lightPlaylist),
                 currentTrackID: currentSong?.id, isPlaying: playerStore.isPlaying,
                 isLoading: isSearching, onScene: openLightScene,
@@ -768,6 +774,8 @@ struct ContentView: View {
                 let keyword = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
                 if keyword.isEmpty {
                     onlineResults = []
+                    searchResultsBySource = [:]
+                    searchErrorsBySource = [:]
                     lightSearchPlaylistResults = []
                     searchError = nil
                 } else {
@@ -2933,6 +2941,8 @@ struct ContentView: View {
         isSearching = true
         searchError = nil
         onlineResults = []
+        searchResultsBySource = [:]
+        searchErrorsBySource = [:]
         defer {
             if searchRequestID == requestID { isSearching = false }
         }
@@ -2952,6 +2962,20 @@ struct ContentView: View {
             guard !Task.isCancelled,
                   searchRequestID == requestID,
                   searchText.trimmingCharacters(in: .whitespacesAndNewlines) == query else { continue }
+            if let errorMessage = response.errorMessage {
+                searchErrorsBySource[source] = errorMessage
+            } else {
+                searchErrorsBySource.removeValue(forKey: source)
+            }
+            // Preserve every provider's own result before global de-duplication;
+            // the QQ and NetEase tabs must never be filtered from 'all sources'.
+            var providerIDs = Set<String>()
+            searchResultsBySource[source] = rows.filter { providerIDs.insert($0.id).inserted }
+                .map { item in
+                    AppSong(id: stableSongID(item), title: item.title, artist: item.artist,
+                            album: item.album ?? "", tint: searchTint(for: item.source),
+                            onlineSong: item)
+                }
             if !rows.isEmpty {
                 received.append(rows)
                 var merged: [MusicSong] = []
