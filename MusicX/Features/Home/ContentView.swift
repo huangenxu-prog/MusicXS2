@@ -367,7 +367,11 @@ struct ContentView: View {
                     onQuality: { isLightSettingsPresented = false; isSettingsAlertPresented = true },
                     onSources: { isLightSettingsPresented = false; isLightSourceAuthPresented = true },
                     onBackup: { isLightSettingsPresented = false; exportMusicBackup() },
-                    onRestore: { isLightSettingsPresented = false; isBackupImportPresented = true })
+                    onRestore: { isLightSettingsPresented = false; isBackupImportPresented = true },
+                    onImportPlaylist: {
+                        isLightSettingsPresented = false
+                        isLightPlaylistImportPresented = true
+                    })
             }
             .sheet(isPresented: $isLightPlaylistImportPresented) {
                 lightPlaylistImportSheet
@@ -870,30 +874,21 @@ struct ContentView: View {
     }
 
     private var lightPlaylistImportSheet: some View {
-        NavigationStack {
-            Form {
-                Section("导入 QQ 音乐或网易云歌单") {
-                    TextField("粘贴歌单分享链接", text: $lightPlaylistLink, axis: .vertical)
-                        .autocorrectionDisabled().textInputAutocapitalization(.never)
-                    Button("解析歌单") { Task { await previewLightImport() } }
-                        .disabled(lightPlaylistLink.isEmpty || isLightPlaylistLoading)
-                    if isLightPlaylistLoading { ProgressView() }
-                    if let message = lightPlaylistMessage {
-                        Text(message).foregroundStyle(MXLight.red)
-                    }
-                    if let preview = lightPlaylistPreview {
-                        Text(preview.displayName)
-                        Text("\(preview.songs.count) 首歌曲").foregroundStyle(MXLight.muted)
-                        Button("保存到我的歌单", action: saveLightImport)
-                    }
-                }
-            }
-            .navigationTitle("导入歌单")
-            .toolbar { ToolbarItem(placement: .topBarTrailing) {
-                Button("关闭") { isLightPlaylistImportPresented = false }
-            } }
-        }
-        .preferredColorScheme(.light)
+        MXReferencePlaylistImport(
+            shareLink: $lightPlaylistLink,
+            isLoading: isLightPlaylistLoading,
+            errorText: lightPlaylistMessage,
+            preview: lightPlaylistPreview.map {
+                MXLightCollection(
+                    id: $0.id, name: $0.displayName,
+                    count: $0.songs.count, artworkURL: $0.playlist.artworkURL,
+                    source: $0.playlist.source
+                )
+            },
+            onBack: { isLightPlaylistImportPresented = false },
+            onParse: { Task { await previewLightImport() } },
+            onSave: saveLightImport
+        )
     }
 
     private var homePage: some View {
