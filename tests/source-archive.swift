@@ -51,13 +51,17 @@ struct LXSourceArchiveTests {
                                                  replaceImported: true)
             preconditionFailure("Invalid source archive was accepted")
         } catch {
-            precondition(try library.load(id: old.id) == oldScript)
+            let unchanged = try library.load(id: old.id)
+            precondition(unchanged == oldScript)
             precondition(library.enabledPlatforms(id: old.id) == ["tx"])
         }
 
-        precondition(try library.restoreSourceArchive(valid, replaceImported: true) == 1)
-        precondition(try library.listIdentifiers() == [replacementID])
-        precondition((try library.load(id: replacementID)).contains("replacement"))
+        let replaced = try library.restoreSourceArchive(valid, replaceImported: true)
+        precondition(replaced == 1)
+        let idsAfterReplace = try library.listIdentifiers()
+        precondition(idsAfterReplace == [replacementID])
+        let contentAfterReplace = try library.load(id: replacementID)
+        precondition(contentAfterReplace.contains("replacement"))
         precondition(library.approvedIDs == [replacementID])
         precondition(library.enabledPlatforms(id: replacementID) == ["wy"])
         precondition(library.selectedID == replacementID)
@@ -70,7 +74,8 @@ struct LXSourceArchiveTests {
              "approved": true, "platforms": ["tx"]]
         ]))
         precondition(merged == 1)
-        precondition(Set(try library.listIdentifiers()) == [old.id, replacementID])
+        let idsAfterMerge = try library.listIdentifiers()
+        precondition(Set(idsAfterMerge) == Set([old.id, replacementID]))
 
         // Simulate process termination after the staged files have replaced the
         // live folder but before metadata has committed. Init must restore both.
@@ -92,7 +97,8 @@ struct LXSourceArchiveTests {
             .write(to: journal, options: .atomic)
         UserDefaults.standard.set(["wrong-id"], forKey: "musicx.lx.approved-source-ids.v1")
         let recovered = try LXSourceLibrary(directory: root)
-        precondition(Set(try recovered.listIdentifiers()) == [old.id, replacementID])
+        let recoveredIDs = try recovered.listIdentifiers()
+        precondition(Set(recoveredIDs) == Set([old.id, replacementID]))
         precondition(recovered.approvedIDs == [old.id, replacementID])
         precondition(recovered.enabledPlatforms(id: replacementID) == ["wy"])
         precondition(recovered.selectedID == replacementID)
