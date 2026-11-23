@@ -124,18 +124,21 @@ struct MXLightTrackRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            if let onFavorite {
-                Button(action: onFavorite) {
-                    Image(systemName: favorite ? "heart.fill" : "heart")
-                        .foregroundStyle(favorite ? MXLight.red : MXLight.muted)
-                        .frame(width: 32, height: 40)
+            Menu {
+                Button("播放", systemImage: "play.fill", action: onPlay)
+                if let onFavorite {
+                    Button(favorite ? "取消收藏" : "收藏歌曲",
+                           systemImage: favorite ? "heart.slash" : "heart",
+                           action: onFavorite)
                 }
-                .buttonStyle(.plain)
-            } else {
+            } label: {
                 Image(systemName: "ellipsis")
-                    .foregroundStyle(MXLight.muted)
-                    .frame(width: 25)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(MXLight.ink)
+                    .frame(width: 42, height: 44)
+                    .contentShape(Rectangle())
             }
+            .accessibilityLabel("更多操作：\(track.title)")
         }
         .padding(.vertical, 6)
     }
@@ -151,6 +154,8 @@ struct MXLightHome: View {
     let onAllCollections: () -> Void
     let onScene: (String) -> Void
     let onSong: (Int) -> Void
+    let isFavorite: (Int) -> Bool
+    let onFavorite: (Int) -> Void
     let onCollection: (String) -> Void
     let onAlbum: (String, String) -> Void
     let onArtist: (String) -> Void
@@ -235,7 +240,10 @@ struct MXLightHome: View {
                         ProgressView("正在加载新歌").tint(MXLight.teal)
                     } else {
                         ForEach(Array(songs.prefix(5).enumerated()), id: \.element.id) { index, track in
-                            MXLightTrackRow(track: track, index: index, onPlay: { onSong(track.id) })
+                            MXLightTrackRow(track: track, index: index,
+                                            onPlay: { onSong(track.id) },
+                                            onFavorite: { onFavorite(track.id) },
+                                            favorite: isFavorite(track.id))
                         }
                     }
                 }
@@ -330,6 +338,8 @@ struct MXLightSearch: View {
     let isLoading: Bool
     let onScene: (String) -> Void
     let onSong: (Int) -> Void
+    let isFavorite: (Int) -> Bool
+    let onFavorite: (Int) -> Void
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -339,8 +349,10 @@ struct MXLightSearch: View {
                     .foregroundStyle(MXLight.ink)
                 HStack(spacing: 9) {
                     Image(systemName: "magnifyingglass").foregroundStyle(MXLight.muted)
-                    TextField("搜索歌曲、歌手或专辑", text: $searchText)
+                    TextField("", text: $searchText,
+                              prompt: Text("搜索歌曲、歌手或专辑").foregroundColor(MXLight.muted))
                         .font(.system(size: 15))
+                        .foregroundStyle(MXLight.ink)
                         .tint(MXLight.red)
                         .autocorrectionDisabled()
                     if !searchText.isEmpty {
@@ -387,7 +399,10 @@ struct MXLightSearch: View {
                 } else {
                     MXLightSectionTitle(title: isLoading ? "正在搜索…" : "歌曲 · \(songs.count)")
                     ForEach(Array(songs.enumerated()), id: \.element.id) { i, song in
-                        MXLightTrackRow(track: song, index: i, onPlay: { onSong(song.id) })
+                        MXLightTrackRow(track: song, index: i,
+                                        onPlay: { onSong(song.id) },
+                                        onFavorite: { onFavorite(song.id) },
+                                        favorite: isFavorite(song.id))
                     }
                     if songs.isEmpty && !isLoading {
                         Text("暂时没有匹配歌曲").font(.system(size: 14)).foregroundStyle(MXLight.muted)
@@ -510,6 +525,53 @@ struct MXLightLibrary: View {
     }
 }
 
+/// Reused by both the main tabs and every light-themed detail route.
+struct MXLightMiniPlayer: View {
+    let now: MXLightTrack
+    let isPlaying: Bool
+    let isResolving: Bool
+    let onPlayer: () -> Void
+    let onPlayPause: () -> Void
+    let onNext: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Button(action: onPlayer) {
+                HStack(spacing: 10) {
+                    MXLightArtwork(url: now.artworkURL, size: 42)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(now.title)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(MXLight.ink).lineLimit(1)
+                        Text(now.artist)
+                            .font(.system(size: 11))
+                            .foregroundStyle(MXLight.muted).lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }.buttonStyle(.plain)
+            Button(action: onPlayPause) {
+                Group {
+                    if isResolving { ProgressView().tint(MXLight.teal) }
+                    else { Image(systemName: isPlaying ? "pause.fill" : "play.fill") }
+                }
+                .frame(width: 36, height: 42)
+            }
+            Button(action: onNext) {
+                Image(systemName: "forward.end.fill")
+                    .frame(width: 34, height: 42)
+            }
+        }
+        .foregroundStyle(MXLight.ink)
+        .padding(.horizontal, 11)
+        .frame(height: 60)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 17))
+        .overlay(RoundedRectangle(cornerRadius: 17).stroke(.white.opacity(0.8), lineWidth: 0.8))
+        .shadow(color: MXLight.ink.opacity(0.10), radius: 9, y: 3)
+        .padding(.horizontal, 12)
+    }
+}
+
 struct MXLightChrome: View {
     let selectedTab: String
     let onTab: (String) -> Void
@@ -521,61 +583,53 @@ struct MXLightChrome: View {
     let onNext: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 8) {
             if let now {
-                HStack(spacing: 11) {
-                    Button(action: onPlayer) {
-                        HStack(spacing: 10) {
-                            MXLightArtwork(url: now.artworkURL, size: 42)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(now.title).font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(MXLight.ink).lineLimit(1)
-                                Text(now.artist).font(.system(size: 11)).foregroundStyle(MXLight.muted).lineLimit(1)
-                            }
-                            Spacer()
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    Button(action: onPlayPause) {
-                        if isResolving { ProgressView().tint(MXLight.teal) }
-                        else { Image(systemName: isPlaying ? "pause.fill" : "play.fill") }
-                    }
-                    .frame(width: 40, height: 42)
-                    Button(action: onNext) { Image(systemName: "forward.end.fill") }
-                        .frame(width: 32, height: 42)
-                }
-                .foregroundStyle(MXLight.ink)
-                .padding(.horizontal, 11)
-                .frame(height: 60)
-                .background(Color.white.opacity(0.98), in: RoundedRectangle(cornerRadius: 16))
-                .shadow(color: MXLight.ink.opacity(0.08), radius: 7, y: 2)
-                .padding(.horizontal, 12)
-                .padding(.bottom, 7)
+                MXLightMiniPlayer(now: now, isPlaying: isPlaying, isResolving: isResolving,
+                                  onPlayer: onPlayer, onPlayPause: onPlayPause, onNext: onNext)
             }
-            HStack(spacing: 0) {
+            HStack(spacing: 5) {
                 tab("首页", icon: "house")
                 tab("搜索", icon: "magnifyingglass")
                 tab("音乐库", icon: "music.note")
             }
-            .frame(height: 55)
-            .background(MXLight.paper)
-            .overlay(alignment: .top) { MXLight.line.frame(height: 0.5) }
+            .padding(7)
+            .frame(height: 64)
+            .background {
+                if #available(iOS 26.0, *) {
+                    Capsule().fill(.ultraThinMaterial)
+                        .glassEffect(.regular, in: .capsule)
+                } else {
+                    Capsule().fill(.ultraThinMaterial)
+                }
+            }
+            .overlay(Capsule().stroke(.white.opacity(0.72), lineWidth: 1))
+            .shadow(color: MXLight.teal.opacity(0.14), radius: 12, y: 4)
+            .padding(.horizontal, 20)
         }
-        .background(MXLight.background)
+        .padding(.top, 6)
+        .padding(.bottom, 3)
+        .background(MXLight.background.opacity(0.15))
     }
 
     private func tab(_ name: String, icon: String) -> some View {
-        Button { onTab(name) } label: {
-            VStack(spacing: 4) {
-                Image(systemName: selectedTab == name ? icon + ".fill" : icon)
-                    .font(.system(size: 22, weight: .medium))
-                    .frame(height: 25)
-                Text(name).font(.system(size: 10, weight: .medium))
+        let active = selectedTab == name
+        let symbol = active && name == "搜索" ? "magnifyingglass.circle.fill"
+                    : active ? icon + ".fill" : icon
+        return Button { onTab(name) } label: {
+            VStack(spacing: 3) {
+                Image(systemName: symbol)
+                    .font(.system(size: 22, weight: active ? .semibold : .regular))
+                    .frame(height: 26)
+                Text(name).font(.system(size: 11, weight: active ? .bold : .medium))
             }
-            .foregroundStyle(selectedTab == name ? MXLight.red : MXLight.muted)
-            .frame(maxWidth: .infinity)
+            .foregroundStyle(active ? MXLight.teal : MXLight.muted)
+            .frame(maxWidth: .infinity, minHeight: 50)
+            .background(active ? MXLight.ochre.opacity(0.38) : .clear, in: Capsule())
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(active ? .isSelected : [])
     }
 }
 
