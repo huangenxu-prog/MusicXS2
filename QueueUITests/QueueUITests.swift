@@ -28,10 +28,8 @@ final class QueueUITests: XCTestCase {
         row.tap()
         app.buttons["mini-open-player"].tap()
         app.buttons["播放队列"].firstMatch.tap()
-        if !favorites {
-            XCTAssertTrue(app.staticTexts["播放队列为空"].waitForExistence(timeout: 5), app.debugDescription)
-            return
-        }
+        // Recent Plays and Favorites must both build the full 27-song queue.
+        // The previous test incorrectly locked in an empty Recent queue.
         XCTAssertTrue(app.staticTexts["27 首"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.buttons["queue-row-FixtureTrack-1"].exists)
         XCTAssertTrue(app.buttons["queue-row-FixtureTrack-2"].exists)
