@@ -130,6 +130,9 @@ struct ContentView: View {
     @State private var lightSearchPlaylistResults: [MusicPlaylist] = []
     @State private var isLightSettingsPresented = false
     @State private var isLightQualityPickerPresented = false
+    @State private var isLightSleepTimerPresented = false
+    @AppStorage("musicx.sleepTimerDeadline.v1") private var sleepTimerDeadline: Double = 0
+    @State private var sleepTimerTask: Task<Void, Never>?
     @State private var isLightPlaylistImportPresented = false
     @State private var lightPlaylistLink = ""
     @State private var lightPlaylistMessage: String?
@@ -346,6 +349,7 @@ struct ContentView: View {
             .onAppear {
                 restorePlaybackSession()
                 playerStore.setRepeatOneEnabled(repeatMode == 2)
+                scheduleSleepTimer()
             }
             // Shared metadata task: both the classic and the light player read
             // lyricLines from here. Previously only the classic player loaded them.
@@ -356,7 +360,14 @@ struct ContentView: View {
                 playerStore.setRepeatOneEnabled(newValue == 2)
             }
             .onChange(of: scenePhase) { _, phase in
-                if phase != .active { savePlaybackSession() }
+                if phase != .active {
+                    savePlaybackSession()
+                } else {
+                    scheduleSleepTimer()
+                }
+            }
+            .onChange(of: sleepTimerDeadline) { _, _ in
+                scheduleSleepTimer()
             }
             .onChange(of: playerStore.currentTime) { _, time in
                 guard time.isFinite else { return }
@@ -382,6 +393,11 @@ struct ContentView: View {
             .sheet(isPresented: $isLightQualityPickerPresented) {
                 MXLightQualityPicker(selectedQualityRaw: $playbackQualityRaw)
                     .presentationDetents([.height(405)])
+                    .presentationDragIndicator(.hidden)
+            }
+            .sheet(isPresented: $isLightSleepTimerPresented) {
+                MXLightSleepTimer(deadline: $sleepTimerDeadline)
+                    .presentationDetents([.height(430)])
                     .presentationDragIndicator(.hidden)
             }
             .alert("音源管理", isPresented: $isLightSourceAuthPresented) {
@@ -819,7 +835,6 @@ struct ContentView: View {
                 },
                 onPlaylist: openLightPlaylist,
                 onImport: { isLightPlaylistImportPresented = true },
-                onSearch: { selectedTab = .search },
                 onSettings: { isLightSettingsPresented = true })
         }
     }
@@ -883,8 +898,37 @@ struct ContentView: View {
             },
             onClearQueue: clearQueue,
             onMoveQueue: moveLightQueue,
-            onQuality: { isLightQualityPickerPresented = true }
+            onQuality: { isLightQualityPickerPresented = true },
+            onSleepTimer: { isLightSleepTimerPresented = true }
         )
+    }
+
+    // The timer is owned by the common player state, not the presented
+    // player view. It survives closing the player and persists the deadline.
+    // The active-scene recheck handles timers deferred by iOS suspension.
+    @MainActor private func scheduleSleepTimer() {
+        sleepTimerTask?.cancel()
+        sleepTimerTask = nil
+        let deadline = sleepTimerDeadline
+        guard deadline > 0 else { return }
+        let secondsLeft = deadline - Date().timeIntervalSince1970
+        if secondsLeft <= 0 {
+            playerStore.pause()
+            sleepTimerDeadline = 0
+            return
+        }
+        sleepTimerTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .seconds(secondsLeft))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled,
+                  sleepTimerDeadline == deadline,
+                  Date().timeIntervalSince1970 >= deadline else { return }
+            playerStore.pause()
+            sleepTimerDeadline = 0
+        }
     }
 
     @MainActor private func previewLightImport() async {
