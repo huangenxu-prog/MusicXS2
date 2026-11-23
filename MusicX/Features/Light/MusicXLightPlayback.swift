@@ -170,6 +170,20 @@ struct MXLightPlayer: View {
             .background(MXLight.background.ignoresSafeArea())
         }
         .preferredColorScheme(.light)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 24, coordinateSpace: .global)
+                .onEnded { value in
+                    let dx = value.translation.width
+                    let dy = value.translation.height
+                    if value.startLocation.y <= 150, dy > 110,
+                       dy > abs(dx) * 1.3 {
+                        onClose()
+                    } else if value.startLocation.x <= 36,
+                              dx > 90, dx > abs(dy) * 1.3 {
+                        onClose()
+                    }
+                }
+        )
     }
 
     private func modeButton(_ text: String, symbol: String, value: String) -> some View {
