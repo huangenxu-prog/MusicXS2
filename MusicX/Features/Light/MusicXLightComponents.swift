@@ -1127,7 +1127,6 @@ struct MXLightChrome: View {
 
 struct MXLightSettings: View {
     @Binding var appearance: String
-    let onQuality: () -> Void
     let onSources: () -> Void
     let onBackup: () -> Void
     let onRestore: () -> Void
