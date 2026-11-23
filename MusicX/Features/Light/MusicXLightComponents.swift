@@ -26,6 +26,7 @@ struct MXLightTrack: Identifiable {
     let album: String
     let artworkURL: URL?
     var duration: TimeInterval? = nil
+    var source: MusicSource? = nil
 }
 
 struct MXLightCollection: Identifiable {
@@ -33,6 +34,7 @@ struct MXLightCollection: Identifiable {
     let name: String
     let count: Int?
     let artworkURL: URL?
+    var source: MusicSource? = nil
 }
 
 // The twelve fallback covers recreate the shapes in index.html (art c1...c12).
@@ -441,84 +443,244 @@ struct MXLightHome: View {
 struct MXLightSearch: View {
     @Binding var searchText: String
     let songs: [MXLightTrack]
+    let playlists: [MXLightCollection]
     let isLoading: Bool
     let onScene: (String) -> Void
     let onSong: (Int) -> Void
     let isFavorite: (Int) -> Bool
     let onFavorite: (Int) -> Void
+    let onAlbum: (String, String) -> Void
+    let onArtist: (String) -> Void
+    let onPlaylist: (String) -> Void
+    @State private var selectedSource = "全部来源"
+    @State private var showAllSongs = false
+
+    private var visibleSongs: [MXLightTrack] {
+        switch selectedSource {
+        case "QQ 音乐": songs.filter { $0.source == .qq }
+        case "网易云": songs.filter { $0.source == .netease }
+        default: songs
+        }
+    }
+    private var visiblePlaylists: [MXLightCollection] {
+        switch selectedSource {
+        case "QQ 音乐": playlists.filter { $0.source == .qq }
+        case "网易云": playlists.filter { $0.source == .netease }
+        default: playlists
+        }
+    }
+    private var artists: [MXLightTrack] {
+        var seen = Set<String>()
+        return visibleSongs.filter { !$0.artist.isEmpty && seen.insert($0.artist).inserted }
+    }
+    private var albums: [MXLightTrack] {
+        var seen = Set<String>()
+        return visibleSongs.filter {
+            !$0.album.isEmpty && seen.insert($0.album + "|" + $0.artist).inserted
+        }
+    }
 
     var body: some View {
         ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 22) {
-                Text("搜索")
-                    .font(.system(size: 32, weight: .bold))
-                    .foregroundStyle(MXLight.ink)
-                HStack(spacing: 9) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(MXLight.muted)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Text("搜索")
+                        .font(.system(size: 30, weight: .heavy))
+                        .foregroundStyle(MXLight.ink)
+                    Spacer()
+                    Image(systemName: "clock")
+                        .font(.system(size: 23))
+                        .foregroundStyle(MXLight.ink)
+                        .frame(width: 38, height: 38)
+                }
+                .padding(.bottom, 23)
+
+                HStack(spacing: 11) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 20))
+                        .foregroundStyle(MXLight.ink)
                     TextField("", text: $searchText,
-                              prompt: Text("搜索歌曲、歌手或专辑").foregroundColor(MXLight.muted))
+                              prompt: Text("搜索歌曲、歌手、专辑、歌单")
+                                .foregroundColor(MXLight.muted))
                         .font(.system(size: 15))
                         .foregroundStyle(MXLight.ink)
                         .tint(MXLight.red)
                         .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .onChange(of: searchText) { _, _ in showAllSongs = false }
                     if !searchText.isEmpty {
                         Button { searchText = "" } label: {
-                            Image(systemName: "xmark.circle.fill").foregroundStyle(MXLight.muted)
+                            Image(systemName: "xmark")
+                                .font(.system(size: 16))
+                                .foregroundStyle(MXLight.muted)
+                                .frame(width: 28, height: 36)
                         }
                     }
                 }
                 .padding(.horizontal, 16)
-                .frame(height: 48)
-                .background(Color.white, in: RoundedRectangle(cornerRadius: 13))
+                .frame(height: 46)
+                .background(MXLight.cream, in: Capsule())
 
-                if searchText.isEmpty {
-                    MXLightSectionTitle(title: "音乐分类")
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                        ForEach(Array(["华语流行", "经典老歌", "轻音乐", "纯音乐", "摇滚", "欧美音乐"].enumerated()), id: \.element) { index, name in
-                            Button { onScene(name) } label: {
-                                HStack(spacing: 8) {
-                                    Image(systemName: ["music.note", "record.circle", "leaf", "pianokeys", "guitars", "headphones"][index])
-                                        .font(.system(size: 19))
-                                    Text(name).font(.system(size: 13, weight: .semibold))
-                                }
-                                .foregroundStyle(index % 2 == 0 ? MXLight.teal : MXLight.ink)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 82)
-                                .background(index % 2 == 0 ? MXLight.ochre.opacity(0.27) : MXLight.teal.opacity(0.10),
-                                            in: RoundedRectangle(cornerRadius: 16))
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 9) {
+                        ForEach(["全部来源", "QQ 音乐", "网易云"], id: \.self) { name in
+                            Button { selectedSource = name } label: {
+                                Text(name)
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundStyle(selectedSource == name ? .white : MXLight.ink)
+                                    .padding(.horizontal, 17)
+                                    .frame(height: 40)
+                                    .background(selectedSource == name ? MXLight.ink : MXLight.cream, in: Capsule())
                             }
                             .buttonStyle(.plain)
                         }
                     }
+                }
+                .padding(.top, 13)
+
+                if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     MXLightSectionTitle(title: "热门搜索")
-                    ForEach(["周杰伦", "陈奕迅", "晴天", "夜曲", "后来"], id: \.self) { keyword in
-                        Button { searchText = keyword } label: {
-                            HStack {
-                                Image(systemName: "arrow.up.right").font(.system(size: 11)).foregroundStyle(MXLight.red)
-                                Text(keyword).foregroundStyle(MXLight.ink)
+                        .padding(.top, 29)
+                    ForEach(["周杰伦", "陈奕迅", "晴天", "夜曲", "后来"], id: \.self) { term in
+                        Button { searchText = term } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "arrow.up.right")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(MXLight.red)
+                                Text(term).foregroundStyle(MXLight.ink)
                                 Spacer()
                             }
-                            .padding(.vertical, 10)
+                            .font(.system(size: 15))
+                            .padding(.vertical, 13)
+                        }.buttonStyle(.plain)
+                    }
+                    MXLightSectionTitle(title: "音乐分类").padding(.top, 24)
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 12),
+                                        GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                        ForEach(Array(["华语流行","经典老歌","轻音乐","纯音乐","摇滚","欧美音乐"].enumerated()),
+                                id: \.element) { i, item in
+                            Button { onScene(item) } label: {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Image(systemName: ["music.note","opticaldisc","leaf","pianokeys",
+                                                       "guitars","headphones"][i])
+                                        .font(.system(size: 23))
+                                    Text(item).font(.system(size: 14, weight: .semibold))
+                                }
+                                .foregroundStyle(i % 2 == 0 ? MXLight.teal : MXLight.ink)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .frame(height: 84)
+                                .padding(.horizontal, 15)
+                                .background(i % 2 == 0 ? MXLight.ochre.opacity(0.27) :
+                                            MXLight.lightTeal,
+                                            in: RoundedRectangle(cornerRadius: 18))
+                            }
+                            .buttonStyle(.plain)
                         }
+                    }
+                    .padding(.top, 14)
+                } else {
+                    MXLightSectionTitle(title: "歌曲")
+                        .padding(.top, 29)
+                    if isLoading && visibleSongs.isEmpty {
+                        ProgressView("正在搜索").tint(MXLight.teal)
+                            .frame(maxWidth: .infinity, minHeight: 85)
+                    }
+                    ForEach(Array((showAllSongs ? visibleSongs : Array(visibleSongs.prefix(4))).enumerated()),
+                            id: \.element.id) { i, song in
+                        HStack(spacing: 0) {
+                            MXLightTrackRow(
+                                track: song, index: i,
+                                onPlay: { onSong(song.id) },
+                                onFavorite: { onFavorite(song.id) },
+                                favorite: isFavorite(song.id))
+                            if let src = song.source {
+                                Text(src == .qq ? "QQ 音乐" : src == .netease ? "网易云" : src.displayName)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(MXLight.muted)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 5)
+                                    .background(MXLight.cream, in: RoundedRectangle(cornerRadius: 5))
+                            }
+                        }
+                    }
+                    if visibleSongs.count > 4 && !showAllSongs {
+                        Button { showAllSongs = true } label: {
+                            Text("查看全部歌曲")
+                                .font(.system(size: 14))
+                                .foregroundStyle(MXLight.ink)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 42)
+                                .background(MXLight.cream, in: Capsule())
+                        }
+                        .padding(.top, 5)
                         .buttonStyle(.plain)
                     }
-                } else {
-                    MXLightSectionTitle(title: isLoading ? "正在搜索…" : "歌曲 · \(songs.count)")
-                    ForEach(Array(songs.enumerated()), id: \.element.id) { i, song in
-                        MXLightTrackRow(track: song, index: i,
-                                        onPlay: { onSong(song.id) },
-                                        onFavorite: { onFavorite(song.id) },
-                                        favorite: isFavorite(song.id))
+
+                    if !artists.isEmpty {
+                        MXLightSectionTitle(title: "歌手").padding(.top, 27)
+                        ForEach(Array(artists.prefix(5).enumerated()), id: \.element.id) { i, track in
+                            Button { onArtist(track.artist) } label: {
+                                HStack(spacing: 12) {
+                                    MXLightArtwork(url: track.artworkURL, size: 48, variant: i)
+                                        .clipShape(Circle())
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(track.artist).font(.system(size: 15, weight: .semibold))
+                                            .foregroundStyle(MXLight.ink)
+                                        Text("歌手").font(.system(size: 12)).foregroundStyle(MXLight.muted)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right").foregroundStyle(MXLight.muted)
+                                }.padding(.vertical, 6)
+                            }.buttonStyle(.plain)
+                        }
                     }
-                    if songs.isEmpty && !isLoading {
-                        Text("暂时没有匹配歌曲").font(.system(size: 14)).foregroundStyle(MXLight.muted)
-                            .frame(maxWidth: .infinity).padding(.vertical, 30)
+                    if !albums.isEmpty {
+                        MXLightSectionTitle(title: "专辑").padding(.top, 27)
+                        ForEach(Array(albums.prefix(5).enumerated()), id: \.element.id) { i, track in
+                            Button { onAlbum(track.album, track.artist) } label: {
+                                HStack(spacing: 12) {
+                                    MXLightArtwork(url: track.artworkURL, size: 48, variant: i+3)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(track.album).font(.system(size: 15, weight: .semibold))
+                                            .foregroundStyle(MXLight.ink).lineLimit(1)
+                                        Text(track.artist).font(.system(size: 12)).foregroundStyle(MXLight.muted)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right").foregroundStyle(MXLight.muted)
+                                }.padding(.vertical, 6)
+                            }.buttonStyle(.plain)
+                        }
+                    }
+                    if !visiblePlaylists.isEmpty {
+                        MXLightSectionTitle(title: "歌单").padding(.top, 27)
+                        ForEach(Array(visiblePlaylists.prefix(5).enumerated()), id: \.element.id) { i, item in
+                            Button { onPlaylist(item.id) } label: {
+                                HStack(spacing: 12) {
+                                    MXLightArtwork(url: item.artworkURL, size: 48, variant: i)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(item.name).font(.system(size: 15, weight: .semibold))
+                                            .foregroundStyle(MXLight.ink).lineLimit(1)
+                                        if let count = item.count {
+                                            Text("\(count) 首").font(.system(size: 12)).foregroundStyle(MXLight.muted)
+                                        }
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right").foregroundStyle(MXLight.muted)
+                                }.padding(.vertical, 6)
+                            }.buttonStyle(.plain)
+                        }
+                    }
+                    if !isLoading && visibleSongs.isEmpty && visiblePlaylists.isEmpty {
+                        Text("暂时没有搜索结果")
+                            .font(.system(size: 14))
+                            .foregroundStyle(MXLight.muted)
+                            .frame(maxWidth: .infinity).padding(.top, 25)
                     }
                 }
             }
             .padding(.horizontal, 24)
-            .padding(.top, 22)
-            .padding(.bottom, 24)
+            .padding(.top, 18)
+            .padding(.bottom, 30)
         }
         .background(MXLight.background)
     }
@@ -533,101 +695,137 @@ struct MXLightLibrary: View {
     let onFavorite: (Int) -> Void
     let onPlaylist: (String) -> Void
     let onImport: () -> Void
+    let onSearch: () -> Void
     let onSettings: () -> Void
 
     var body: some View {
         ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 20) {
-                HStack {
-                    Text("音乐库").font(.system(size: 32, weight: .bold))
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("音乐库")
+                            .font(.system(size: 30, weight: .bold))
+                            .foregroundStyle(MXLight.ink)
+                        Text("所有喜欢的音乐，都在这里")
+                            .font(.system(size: 13))
+                            .foregroundStyle(MXLight.muted)
+                    }
                     Spacer()
-                    Button(action: onSettings) { Image(systemName: "ellipsis.circle").font(.system(size: 24)) }
-                        .accessibilityLabel("音乐库设置")
+                    Button(action: onSearch) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 22)).frame(width: 40, height: 40)
+                    }
+                    Button(action: onSettings) {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 22)).frame(width: 40, height: 40)
+                    }
                 }
                 .foregroundStyle(MXLight.ink)
-                VStack(spacing: 0) {
-                    shortcut("最近播放", symbol: "clock", count: recent.count, value: "recent")
-                    Divider().overlay(MXLight.line)
-                    shortcut("收藏歌曲", symbol: "heart", count: favorites.count, value: "favorites")
-                    Divider().overlay(MXLight.line)
-                    shortcut("我的歌单", symbol: "music.note.list", count: playlists.count, value: "playlists")
-                }
-                .padding(.horizontal, 17)
-                .background(Color.white, in: RoundedRectangle(cornerRadius: 18))
+                .padding(.bottom, 23)
 
-                HStack(spacing: 10) {
-                    ForEach(["recent", "favorites", "playlists"], id: \.self) { value in
-                        Button(label(value)) { segment = value }
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(segment == value ? .white : MXLight.muted)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 37)
-                            .background(segment == value ? MXLight.teal : MXLight.paper, in: Capsule())
+                VStack(spacing: 0) {
+                    shortcut("最近播放", icon: "clock", count: recent.count, value: "recent")
+                    MXLight.line.frame(height: 0.5)
+                    shortcut("收藏歌曲", icon: "heart", count: favorites.count, value: "favorites")
+                    MXLight.line.frame(height: 0.5)
+                    shortcut("我的歌单", icon: "list.bullet", count: playlists.count, value: "playlists")
+                }
+                .padding(.horizontal, 15)
+                .background(MXLight.paper, in: RoundedRectangle(cornerRadius: 18))
+
+                HStack {
+                    MXLightSectionTitle(title: segment == "playlists" ? "我的歌单"
+                                        : segment == "recent" ? "最近播放" : "收藏歌曲")
+                    Spacer()
+                    if segment != "playlists" {
+                        Button("返回歌单") { segment = "playlists" }
+                            .font(.system(size: 12)).foregroundStyle(MXLight.muted)
+                    } else {
+                        Button(action: onImport) {
+                            Label("导入", systemImage: "plus").font(.system(size: 12))
+                                .foregroundStyle(MXLight.red)
+                        }
                     }
                 }
+                .padding(.top, 27)
+                .padding(.bottom, 14)
 
                 if segment == "playlists" {
-                    HStack {
-                        MXLightSectionTitle(title: "我的歌单")
+                    if playlists.isEmpty {
                         Button(action: onImport) {
-                            Image(systemName: "plus").font(.system(size: 18)).foregroundStyle(MXLight.red)
+                            Label("导入 QQ 音乐或网易云歌单", systemImage: "plus")
+                                .font(.system(size: 14))
+                                .foregroundStyle(MXLight.teal)
+                                .frame(maxWidth: .infinity, minHeight: 100)
+                                .background(MXLight.cream, in: RoundedRectangle(cornerRadius: 18))
                         }
-                    }
-                    ForEach(Array(playlists.enumerated()), id: \.element.id) { i, item in
-                        Button { onPlaylist(item.id) } label: {
-                            HStack(spacing: 12) {
-                                MXLightArtwork(url: item.artworkURL, size: 62, variant: i)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(item.name).font(.system(size: 15, weight: .semibold)).foregroundStyle(MXLight.ink)
-                                    Text("\(item.count ?? 0) 首歌曲").font(.system(size: 12)).foregroundStyle(MXLight.muted)
-                                }
-                                Spacer()
-                                Image(systemName: "chevron.right").font(.system(size: 12)).foregroundStyle(MXLight.muted)
+                    } else {
+                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 14),
+                                            GridItem(.flexible(), spacing: 14)], spacing: 16) {
+                            ForEach(Array(playlists.enumerated()), id: \.element.id) { index, item in
+                                Button { onPlaylist(item.id) } label: {
+                                    VStack(alignment: .leading, spacing: 7) {
+                                        GeometryReader { proxy in
+                                            MXLightArtwork(url: item.artworkURL,
+                                                           size: proxy.size.width, variant: index)
+                                        }
+                                        .aspectRatio(1, contentMode: .fit)
+                                        Text(item.name)
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundStyle(MXLight.ink).lineLimit(2)
+                                        Text("\(item.source?.displayName ?? "歌单") · \(item.count ?? 0) 首")
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(MXLight.muted).lineLimit(1)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                }.buttonStyle(.plain)
                             }
                         }
-                        .buttonStyle(.plain)
                     }
                 } else {
                     let visible = segment == "favorites" ? favorites : recent
-                    MXLightSectionTitle(title: segment == "favorites" ? "收藏歌曲" : "最近播放")
                     if visible.isEmpty {
-                        Text("这里还没有音乐").foregroundStyle(MXLight.muted).padding(.vertical, 22)
+                        Text("这里还没有音乐")
+                            .font(.system(size: 14)).foregroundStyle(MXLight.muted)
+                            .padding(.vertical, 26)
                     } else {
-                        ForEach(Array(visible.enumerated()), id: \.element.id) { i, song in
-                            MXLightTrackRow(track: song, index: i, onPlay: { onSong(song.id, segment) },
-                                            onFavorite: { onFavorite(song.id) },
-                                            favorite: favorites.contains(where: { $0.id == song.id }))
+                        ForEach(Array(visible.enumerated()), id: \.element.id) { i, track in
+                            MXLightTrackRow(track: track, index: i,
+                                            onPlay: { onSong(track.id, segment) },
+                                            onFavorite: { onFavorite(track.id) },
+                                            favorite: favorites.contains { $0.id == track.id })
                         }
                     }
                 }
             }
             .padding(.horizontal, 24)
-            .padding(.top, 22)
-            .padding(.bottom, 24)
+            .padding(.top, 18)
+            .padding(.bottom, 30)
         }
         .background(MXLight.background)
     }
 
-    private func label(_ value: String) -> String {
-        switch value {
-        case "favorites": "收藏"
-        case "playlists": "歌单"
-        default: "最近"
-        }
-    }
-
-    private func shortcut(_ title: String, symbol: String, count: Int, value: String) -> some View {
+    private func shortcut(_ title: String, icon: String, count: Int, value: String) -> some View {
         Button { segment = value } label: {
-            HStack(spacing: 13) {
-                Image(systemName: symbol).font(.system(size: 20)).foregroundStyle(MXLight.red).frame(width: 27)
-                Text(title).font(.system(size: 16, weight: .medium)).foregroundStyle(MXLight.ink)
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 17))
+                    .foregroundStyle(value == "favorites" ? MXLight.red : MXLight.muted)
+                    .frame(width: 34, height: 34)
+                    .background(MXLight.cream, in: Circle())
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(MXLight.ink)
                 Spacer()
-                Text("\(count)").foregroundStyle(MXLight.muted)
-                Image(systemName: "chevron.right").font(.system(size: 12)).foregroundStyle(MXLight.muted)
+                Text("\(count) 首")
+                    .font(.system(size: 12))
+                    .foregroundStyle(MXLight.muted)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13))
+                    .foregroundStyle(MXLight.muted)
             }
-            .frame(height: 58)
-        }
-        .buttonStyle(.plain)
+            .frame(height: 57)
+        }.buttonStyle(.plain)
     }
 }
 
