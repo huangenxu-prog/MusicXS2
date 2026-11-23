@@ -41,6 +41,7 @@ struct MXReferenceSources: View {
 
     @State private var sourceItems: [SourceItem] = []
     @State private var isSourceListExpanded = false
+    @State private var expandedSourceID: String?
     @State private var message: String?
     @State private var isSyncing = false
     @State private var showJSImporter = false
@@ -151,7 +152,7 @@ struct MXReferenceSources: View {
                                     Text("音源列表")
                                         .font(.system(size: 16, weight: .semibold))
                                         .foregroundStyle(MXLight.ink)
-                                    Text("已启用 \(enabledCount) / \(sourceItems.count)")
+                                    Text("已启用 \(enabledCount) / \(sourceItems.count) 条音源")
                                         .font(.system(size: 12))
                                         .foregroundStyle(MXLight.muted)
                                 }
@@ -176,43 +177,81 @@ struct MXReferenceSources: View {
                                     .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
                             } else {
                                 ForEach(Array(sourceItems.enumerated()), id: \.element.id) { index, item in
-                                    Button { toggleSource(item) } label: {
-                                        HStack(spacing: 10) {
-                                            Image(systemName: "music.note")
-                                                .font(.system(size: 15))
-                                                .foregroundStyle(MXLight.teal)
-                                                .frame(width: 30, height: 30)
-                                                .background(MXLight.lightTeal, in: Circle())
-                                            VStack(alignment: .leading, spacing: 4) {
-                                                Text(item.name)
-                                                    .font(.system(size: 14, weight: .medium))
-                                                    .foregroundStyle(MXLight.ink)
-                                                    .lineLimit(1)
-                                                Text(item.approved
-                                                     ? displayPlatforms(item.platforms)
-                                                     : "待试听批准")
-                                                    .font(.system(size: 11))
-                                                    .foregroundStyle(MXLight.muted)
-                                                    .lineLimit(1)
+                                    VStack(spacing: 0) {
+                                        Button {
+                                            withAnimation(.easeInOut(duration: 0.22)) {
+                                                expandedSourceID = expandedSourceID == item.id ? nil : item.id
                                             }
-                                            Spacer(minLength: 6)
-                                            Image(systemName: item.isEnabled
-                                                  ? "checkmark.circle.fill" : "circle")
-                                                .font(.system(size: 24))
-                                                .foregroundStyle(item.isEnabled
-                                                                 ? MXLight.teal : MXLight.muted)
+                                        } label: {
+                                            HStack(spacing: 10) {
+                                                Image(systemName: "music.note")
+                                                    .font(.system(size: 15))
+                                                    .foregroundStyle(MXLight.teal)
+                                                    .frame(width: 30, height: 30)
+                                                    .background(MXLight.lightTeal, in: Circle())
+                                                VStack(alignment: .leading, spacing: 4) {
+                                                    Text(item.name)
+                                                        .font(.system(size: 14, weight: .medium))
+                                                        .foregroundStyle(MXLight.ink)
+                                                        .lineLimit(1)
+                                                    Text(item.approved
+                                                         ? "已启用 \(item.platforms.count) / 4 个平台"
+                                                         : "待批准 · 已勾选 \(item.platforms.count) / 4")
+                                                        .font(.system(size: 11))
+                                                        .foregroundStyle(MXLight.muted)
+                                                        .lineLimit(1)
+                                                }
+                                                Spacer(minLength: 6)
+                                                Image(systemName: expandedSourceID == item.id
+                                                      ? "chevron.up" : "chevron.down")
+                                                    .font(.system(size: 15, weight: .semibold))
+                                                    .foregroundStyle(MXLight.muted)
+                                                    .frame(width: 32, height: 44)
+                                            }
+                                            .frame(minHeight: 58)
+                                            .contentShape(Rectangle())
                                         }
-                                        .frame(minHeight: 53)
-                                        .contentShape(Rectangle())
+                                        .buttonStyle(.plain)
+                                        .accessibilityLabel("\(item.name)，\(item.platforms.count) 个平台已勾选，点击展开设置")
+
+                                        if expandedSourceID == item.id {
+                                            VStack(spacing: 0) {
+                                                MXLight.line.frame(height: 0.5)
+                                                ForEach(Array(platforms.enumerated()), id: \.offset) { platformIndex, platform in
+                                                    let checked = item.platforms.contains(platform.id)
+                                                    Button {
+                                                        togglePlatform(item, platform: platform.id)
+                                                    } label: {
+                                                        HStack(spacing: 12) {
+                                                            Text(platform.title)
+                                                                .font(.system(size: 14, weight: .medium))
+                                                                .foregroundStyle(MXLight.ink)
+                                                            Spacer()
+                                                            Image(systemName: checked ? "checkmark.circle.fill" : "circle")
+                                                                .font(.system(size: 23))
+                                                                .foregroundStyle(checked ? MXLight.teal : MXLight.muted)
+                                                        }
+                                                        .frame(minHeight: 46)
+                                                        .contentShape(Rectangle())
+                                                    }
+                                                    .buttonStyle(.plain)
+                                                    .accessibilityLabel("\(item.name) · \(platform.title) · \(checked ? "已勾选" : "未勾选")")
+                                                    if platformIndex < platforms.count - 1 {
+                                                        MXLight.line.frame(height: 0.5)
+                                                    }
+                                                }
+                                            }
+                                            .padding(.leading, 40)
+                                            .padding(.bottom, 8)
+                                            .transition(.opacity.combined(with: .move(edge: .top)))
+                                        }
                                     }
-                                    .buttonStyle(.plain)
-                                    .accessibilityLabel("\(item.name)，\(item.isEnabled ? "已启用" : "未启用")，点击切换")
                                     if index < sourceItems.count - 1 {
                                         MXLight.line.frame(height: 0.5)
                                     }
                                 }
                             }
-                            Text("点击音源即可勾选启停；未批准的脚本需在高级管理中先通过试听。")
+                            Text("点击音源名称展开四个平台，再分别勾选；未通过试听批准的脚本不会参与正式播放。")
                                 .font(.system(size: 11))
                                 .foregroundStyle(MXLight.muted)
                                 .padding(.top, 8)
@@ -460,20 +499,20 @@ struct MXReferenceSources: View {
         }
     }
 
-    @MainActor private func toggleSource(_ item: SourceItem) {
-        guard item.approved else {
-            message = "这条音源需要先进入高级管理试听，通过后才能勾选启用。"
-            return
-        }
+    @MainActor private func togglePlatform(_ item: SourceItem, platform: String) {
+        guard LXSourceLibrary.playbackPlatforms.contains(platform) else { return }
         do {
             let lib = try LXSourceLibrary()
-            for platform in LXSourceLibrary.playbackPlatforms {
-                try lib.setPlatformEnabled(id: item.id, platform: platform,
-                                           enabled: !item.isEnabled)
-            }
+            let wasEnabled = lib.enabledPlatforms(id: item.id).contains(platform)
+            try lib.setPlatformEnabled(id: item.id, platform: platform, enabled: !wasEnabled)
             reload()
+            if !item.approved && !wasEnabled {
+                message = "已保存平台勾选，但音源仍需在高级测试中通过试听才能参与播放。"
+            } else {
+                message = nil
+            }
         } catch {
-            message = "更改音源状态失败：\(error.localizedDescription)"
+            message = "更改平台状态失败：\(error.localizedDescription)"
         }
     }
 
