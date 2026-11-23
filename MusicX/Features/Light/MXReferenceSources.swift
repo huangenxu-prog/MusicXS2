@@ -42,6 +42,12 @@ struct MXReferenceSources: View {
     @State private var sourceItems: [SourceItem] = []
     @State private var isSourceListExpanded = false
     @State private var expandedSourceID: String?
+    // The test target is an explicit JS script, never the playback fallback pool.
+    @State private var testSourceID: String?
+    @State private var testStatusByPlatform: [String: String] = [:]
+    @State private var testedPlayingPlatform: String?
+    @State private var activeTestHost: LXSourceScriptHost?
+    @State private var previewCheckTask: Task<Void, Never>?
     @State private var message: String?
     @State private var isSyncing = false
     @State private var showJSImporter = false
@@ -240,6 +246,22 @@ struct MXReferenceSources: View {
                                                         MXLight.line.frame(height: 0.5)
                                                     }
                                                 }
+                                                Button {
+                                                    selectTestSource(item.id)
+                                                } label: {
+                                                    HStack(spacing: 6) {
+                                                        Image(systemName: "waveform")
+                                                        Text(testSourceID == item.id ? "当前测试音源" : "测试此音源")
+                                                        Spacer()
+                                                        Image(systemName: "chevron.right")
+                                                    }
+                                                    .font(.system(size: 13, weight: .semibold))
+                                                    .foregroundStyle(testSourceID == item.id ? MXLight.teal : MXLight.red)
+                                                    .frame(minHeight: 45)
+                                                    .contentShape(Rectangle())
+                                                }
+                                                .buttonStyle(.plain)
+                                                .accessibilityLabel("使用\(item.name)进行独立取链测试")
                                             }
                                             .padding(.leading, 40)
                                             .padding(.bottom, 8)
@@ -277,6 +299,34 @@ struct MXReferenceSources: View {
                             }
                             .accessibilityLabel("高级音源测试")
                         }
+                        Menu {
+                            ForEach(sourceItems) { item in
+                                Button {
+                                    selectTestSource(item.id)
+                                } label: {
+                                    Label(item.name, systemImage: testSourceID == item.id
+                                          ? "checkmark.circle.fill" : "music.note")
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "square.stack.3d.up")
+                                Text(testSourceID.flatMap { id in
+                                    sourceItems.first(where: { $0.id == id })?.name
+                                } ?? "请选择要测试的 JS 音源")
+                                    .lineLimit(1)
+                                Spacer(minLength: 8)
+                                Image(systemName: "chevron.down")
+                            }
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(testSourceID == nil ? MXLight.muted : MXLight.teal)
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 46)
+                            .background(MXLight.cream, in: RoundedRectangle(cornerRadius: 13))
+                        }
+                        .disabled(sourceItems.isEmpty)
+                        .accessibilityLabel("选择独立测试音源")
+
                         HStack(spacing: 9) {
                             HStack(spacing: 9) {
                                 Image(systemName: "magnifyingglass")
@@ -313,16 +363,17 @@ struct MXReferenceSources: View {
                             }
                             .foregroundStyle(.white)
                             .background(MXLight.red, in: Capsule())
-                            .disabled(isSearching || testKeyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .disabled(isSearching || testSourceID == nil ||
+                                      testKeyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         }
 
                         if testHits.isEmpty && !isSearching {
-                            Text("输入歌名，展示 QQ、网易云、酷我、酷狗各一条匹配结果。")
+                            Text("先选定一条 JS 音源，再搜索歌曲。每个平台展示最多一首候选，试听只通过该 JS 音源取链。")
                                 .font(.system(size: 12))
                                 .foregroundStyle(MXLight.muted)
                                 .padding(.vertical, 5)
                         } else {
-                            Text(isSearching ? "正在搜索四个平台…" : "点击歌曲试听")
+                            Text(isSearching ? "正在搜索四个平台的歌曲信息…" : "点击歌曲，只测试所选 JS 音源对应平台")
                                 .font(.system(size: 12))
                                 .foregroundStyle(MXLight.muted)
                         }
@@ -360,7 +411,7 @@ struct MXReferenceSources: View {
                                                 ProgressView().tint(MXLight.teal)
                                             } else {
                                                 Image(systemName: previewPlatform == hit.platform
-                                                      ? "pause.circle" : "play.circle")
+                                                      ? "stop.circle" : "play.circle")
                                                     .font(.system(size: 27))
                                                     .foregroundStyle(MXLight.teal)
                                             }
@@ -370,7 +421,24 @@ struct MXReferenceSources: View {
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
-                                .accessibilityLabel("试听 \(hit.displayName) 的 \(song.title)")
+                                .accessibilityLabel("使用选定音源独立试听 \(hit.displayName) 的 \(song.title)")
+                                if let status = testStatusByPlatform[hit.platform] {
+                                    Text(status)
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(MXLight.muted)
+                                        .lineLimit(4)
+                                }
+                                if testedPlayingPlatform == hit.platform,
+                                   let selectedID = testSourceID,
+                                   let item = sourceItems.first(where: { $0.id == selectedID }),
+                                   !item.approved {
+                                    Button("确认听到声音 · 批准当前平台") {
+                                        approveTestedPlatform(hit.platform)
+                                    }
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(MXLight.teal)
+                                    .frame(minHeight: 44, alignment: .leading)
+                                }
                             } else {
                                 HStack {
                                     Text(hit.displayName)
@@ -384,7 +452,7 @@ struct MXReferenceSources: View {
                                 .frame(minHeight: 43)
                             }
                         }
-                        Text("平台标签表示搜索来源；实际试听链接可能由已启用音源自动回退补全。")
+                        Text("测试仅执行当前选中的 JS 脚本，不使用其他 JS、原生接口或缓存地址回退。搜索成功不等于取链成功；播放器开始播放后，还需确认实际有声。")
                             .font(.system(size: 11))
                             .foregroundStyle(MXLight.muted)
                     }
