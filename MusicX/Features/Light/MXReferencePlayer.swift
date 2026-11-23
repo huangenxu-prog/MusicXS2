@@ -263,10 +263,10 @@ struct MXReferencePlayer: View {
                             ForEach(Array(lyrics.enumerated()), id: \.offset) { index, line in
                                 Text(line)
                                     .font(.system(size: index == activeLyricIndex ? 25 : 21,
-                                                  weight: .semibold))
+                                                  weight: index == activeLyricIndex ? .semibold : .medium))
                                     .foregroundStyle(index == activeLyricIndex ? MXLight.red :
-                                                     index < activeLyricIndex ? MXLight.headingMuted :
-                                                     Color(red: 183/255, green: 174/255, blue: 160/255))
+                                                     index < activeLyricIndex ? MXLight.ink.opacity(0.77) :
+                                                     MXLight.ink.opacity(0.67))
                                     .multilineTextAlignment(.leading)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .id(index)
