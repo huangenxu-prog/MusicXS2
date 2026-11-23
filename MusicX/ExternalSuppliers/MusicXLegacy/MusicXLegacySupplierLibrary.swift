@@ -49,6 +49,30 @@ struct MusicXLegacySupplierLibrary: MusicResourceProvider, MusicCatalogSearchPro
                 )
             }
         }
+        // QQ's GDStudio endpoint can intermittently return no results or errors.
+        // Fall back to the already implemented signed QQ desktop search instead
+        // of silently leaving the QQ tab empty. Keep album lookup unchanged.
+        if source == .qq && !albumOnly {
+            do {
+                let rows = try await service.search(
+                    keyword: keyword, source: source, page: page,
+                    count: count, albumOnly: false
+                )
+                if !rows.isEmpty { return rows }
+            } catch {
+                if Task.isCancelled || error is CancellationError
+                    || (error as? URLError)?.code == .cancelled {
+                    throw CancellationError()
+                }
+                MusicSourceDiagnostics.shared.record(
+                    event: "search-fallback", source: source.rawValue,
+                    provider: "gdstudio-qq", duration: 0,
+                    result: "fallback_to_qq_native", detail: error.localizedDescription
+                )
+            }
+            return try await service.searchQQSongsNative(keyword: keyword, count: count)
+        }
+
         return try await service.search(
             keyword: keyword,
             source: source,
