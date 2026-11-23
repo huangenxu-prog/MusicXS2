@@ -869,7 +869,7 @@ struct MXLightMiniPlayer: View {
         .foregroundStyle(MXLight.ink)
         .padding(.horizontal, 11)
         .frame(height: 60)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 17))
+        .background(MXLight.paper.opacity(0.99), in: RoundedRectangle(cornerRadius: 17))
         .overlay(RoundedRectangle(cornerRadius: 17).stroke(.white.opacity(0.8), lineWidth: 0.8))
         .shadow(color: MXLight.ink.opacity(0.10), radius: 9, y: 3)
         .padding(.horizontal, 12)
@@ -922,8 +922,12 @@ struct MXLightChrome: View {
 
     private func tab(_ name: String, icon: String) -> some View {
         let active = selectedTab == name
-        let symbol = active && name == "搜索" ? "magnifyingglass.circle.fill"
-                    : active ? icon + ".fill" : icon
+        let symbol: String
+        switch name {
+        case "首页": symbol = active ? "house.fill" : "house"
+        case "搜索": symbol = "magnifyingglass"
+        default: symbol = "music.note"
+        }
         return Button { onTab(name) } label: {
             VStack(spacing: 3) {
                 Image(systemName: symbol)
@@ -931,9 +935,9 @@ struct MXLightChrome: View {
                     .frame(height: 26)
                 Text(name).font(.system(size: 11, weight: active ? .bold : .medium))
             }
-            .foregroundStyle(active ? MXLight.teal : MXLight.muted)
+            .foregroundStyle(active ? MXLight.red : MXLight.muted)
             .frame(maxWidth: .infinity, minHeight: 50)
-            .background(active ? MXLight.ochre.opacity(0.38) : .clear, in: Capsule())
+            .background(active ? MXLight.red.opacity(0.11) : .clear, in: Capsule())
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
