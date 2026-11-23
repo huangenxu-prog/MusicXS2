@@ -157,6 +157,8 @@ struct MXLightTrackRow: View {
     let onPlay: () -> Void
     var onFavorite: (() -> Void)? = nil
     var favorite = false
+    var isCurrent = false
+    var isPlaying = false
 
     private var durationText: String? {
         guard let seconds = track.duration, seconds.isFinite, seconds > 0 else { return nil }
@@ -184,11 +186,19 @@ struct MXLightTrackRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            if let durationText {
-                Text(durationText)
-                    .font(.system(size: 12))
-                    .foregroundStyle(MXLight.muted)
-                    .monospacedDigit()
+            HStack(spacing: 6) {
+                if isCurrent {
+                    Image(systemName: isPlaying ? "waveform" : "pause.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(MXLight.red)
+                        .accessibilityLabel(isPlaying ? "正在播放" : "当前歌曲已暂停")
+                }
+                if let durationText {
+                    Text(durationText)
+                        .font(.system(size: 12))
+                        .foregroundStyle(MXLight.muted)
+                        .monospacedDigit()
+                }
             }
             Menu {
                 Button("播放", systemImage: "play.fill", action: onPlay)
@@ -213,6 +223,8 @@ struct MXLightTrackRow: View {
 struct MXLightHome: View {
     let songs: [MXLightTrack]
     let collections: [MXLightCollection]
+    let currentTrackID: Int?
+    let isPlaying: Bool
     let onDaily: () -> Void
     let onFavorites: () -> Void
     let onCharts: () -> Void
@@ -339,7 +351,9 @@ struct MXLightHome: View {
                                 track: track, index: index,
                                 onPlay: { onSong(track.id) },
                                 onFavorite: { onFavorite(track.id) },
-                                favorite: isFavorite(track.id)
+                                favorite: isFavorite(track.id),
+                                isCurrent: track.id == currentTrackID,
+                                isPlaying: isPlaying
                             )
                         }
                     }
@@ -444,6 +458,8 @@ struct MXLightSearch: View {
     @Binding var searchText: String
     let songs: [MXLightTrack]
     let playlists: [MXLightCollection]
+    let currentTrackID: Int?
+    let isPlaying: Bool
     let isLoading: Bool
     let onScene: (String) -> Void
     let onSong: (Int) -> Void
@@ -592,7 +608,9 @@ struct MXLightSearch: View {
                                 track: song, index: i,
                                 onPlay: { onSong(song.id) },
                                 onFavorite: { onFavorite(song.id) },
-                                favorite: isFavorite(song.id))
+                                favorite: isFavorite(song.id),
+                                isCurrent: song.id == currentTrackID,
+                                isPlaying: isPlaying)
                             if let src = song.source {
                                 Text(src == .qq ? "QQ 音乐" : src == .netease ? "网易云" : src.displayName)
                                     .font(.system(size: 10))
@@ -691,6 +709,8 @@ struct MXLightLibrary: View {
     let recent: [MXLightTrack]
     let favorites: [MXLightTrack]
     let playlists: [MXLightCollection]
+    let currentTrackID: Int?
+    let isPlaying: Bool
     let onSong: (Int, String) -> Void
     let onFavorite: (Int) -> Void
     let onPlaylist: (String) -> Void
@@ -793,7 +813,9 @@ struct MXLightLibrary: View {
                             MXLightTrackRow(track: track, index: i,
                                             onPlay: { onSong(track.id, segment) },
                                             onFavorite: { onFavorite(track.id) },
-                                            favorite: favorites.contains { $0.id == track.id })
+                                            favorite: favorites.contains { $0.id == track.id },
+                                            isCurrent: track.id == currentTrackID,
+                                            isPlaying: isPlaying)
                         }
                     }
                 }
@@ -839,7 +861,10 @@ struct MXLightMiniPlayer: View {
     let onNext: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
+        // A full-width hit target sits beneath the two transport buttons.
+        // Tapping the empty middle area opens the player; the two controls
+        // still receive their own taps and do not trigger the player sheet.
+        ZStack(alignment: .trailing) {
             Button(action: onPlayer) {
                 HStack(spacing: 10) {
                     MXLightArtwork(url: now.artworkURL, size: 42)
@@ -853,24 +878,40 @@ struct MXLightMiniPlayer: View {
                     }
                     Spacer(minLength: 0)
                 }
-            }.buttonStyle(.plain)
-            Button(action: onPlayPause) {
-                Group {
-                    if isResolving { ProgressView().tint(MXLight.teal) }
-                    else { Image(systemName: isPlaying ? "pause.fill" : "play.fill") }
+                .padding(.leading, 11)
+                .padding(.trailing, 100)
+                .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("打开播放器：\(now.title)")
+
+            HStack(spacing: 8) {
+                Button(action: onPlayPause) {
+                    Group {
+                        if isResolving { ProgressView().tint(MXLight.teal) }
+                        else { Image(systemName: isPlaying ? "pause.fill" : "play.fill") }
+                    }
+                    .frame(width: 38, height: 48)
+                    .contentShape(Rectangle())
                 }
-                .frame(width: 36, height: 42)
+                .accessibilityLabel(isPlaying ? "暂停" : "播放")
+                Button(action: onNext) {
+                    Image(systemName: "forward.end.fill")
+                        .frame(width: 38, height: 48)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("下一首")
             }
-            Button(action: onNext) {
-                Image(systemName: "forward.end.fill")
-                    .frame(width: 34, height: 42)
-            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 10)
         }
         .foregroundStyle(MXLight.ink)
-        .padding(.horizontal, 11)
         .frame(height: 60)
         .background(MXLight.paper.opacity(0.99), in: RoundedRectangle(cornerRadius: 17))
-        .overlay(RoundedRectangle(cornerRadius: 17).stroke(.white.opacity(0.8), lineWidth: 0.8))
+        .overlay(RoundedRectangle(cornerRadius: 17)
+            .stroke(.white.opacity(0.8), lineWidth: 0.8)
+            .allowsHitTesting(false))
         .shadow(color: MXLight.ink.opacity(0.10), radius: 9, y: 3)
         .padding(.horizontal, 12)
     }
