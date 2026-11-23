@@ -9,6 +9,7 @@ on:
       - test/build-486-complete-source
       - test/ui-build-486-exact
       - feature/light-skin-repeat-one-20261123
+      - feature/light-design-fidelity-20261123
   workflow_dispatch:
 
 permissions:
