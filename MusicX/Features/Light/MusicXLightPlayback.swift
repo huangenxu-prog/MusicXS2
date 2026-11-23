@@ -273,6 +273,8 @@ struct MXLightDetail: View {
     let onBack: () -> Void
     let onPlay: (MusicSong, [MusicSong]) -> Void
     let onOpen: (MusicDiscoveryRoute) -> Void
+    let isFavorite: (MusicSong) -> Bool
+    let onFavorite: (MusicSong) -> Void
 
     @State private var tracks: [MusicSong] = []
     @State private var playlists: [MusicPlaylist] = []
@@ -306,7 +308,23 @@ struct MXLightDetail: View {
                 Spacer()
                 Text(title).font(.system(size: 17, weight: .semibold)).lineLimit(1)
                 Spacer()
-                Image(systemName: "ellipsis").frame(width: 36, height: 38)
+                Menu {
+                    if let first = tracks.first {
+                        Button("播放全部", systemImage: "play.fill") {
+                            onPlay(first, tracks)
+                        }
+                        Button("随机播放", systemImage: "shuffle") {
+                            if let random = tracks.randomElement() {
+                                onPlay(random, tracks)
+                            }
+                        }
+                    }
+                    Button("返回", systemImage: "chevron.left", action: onBack)
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 42, height: 38)
+                }
             }
             .foregroundStyle(MXLight.ink)
             .padding(.horizontal, 18)
@@ -318,7 +336,9 @@ struct MXLightDetail: View {
                         MXLightArtwork(url: playlists.first?.artworkURL ?? tracks.first?.artworkURL,
                                        size: 116)
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(title).font(.system(size: 24, weight: .bold)).lineLimit(2)
+                            Text(title).font(.system(size: 24, weight: .bold))
+                                .foregroundStyle(MXLight.ink)
+                                .lineLimit(2)
                             Text("\(tracks.count) 首歌曲")
                                 .font(.system(size: 12)).foregroundStyle(MXLight.muted)
                             if let first = tracks.first {
@@ -371,7 +391,9 @@ struct MXLightDetail: View {
                                     track: MXLightTrack(id: stableID(track), title: track.title,
                                                         artist: track.artist, album: track.album ?? "",
                                                         artworkURL: track.artworkURL), index: i,
-                                    onPlay: { onPlay(track, tracks) })
+                                    onPlay: { onPlay(track, tracks) },
+                                    onFavorite: { onFavorite(track) },
+                                    favorite: isFavorite(track))
                                 if i < tracks.count - 1 { MXLight.line.frame(height: 0.5) }
                             }
                         }
@@ -384,6 +406,16 @@ struct MXLightDetail: View {
         }
         .background(MXLight.background.ignoresSafeArea())
         .task(id: route.id) { await load() }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 22, coordinateSpace: .global)
+                .onEnded { value in
+                    let dx = value.translation.width
+                    let dy = value.translation.height
+                    guard value.startLocation.x <= 36,
+                          dx >= 80, dx > abs(dy) * 1.35 else { return }
+                    onBack()
+                }
+        )
         .preferredColorScheme(.light)
     }
 
