@@ -53,6 +53,25 @@ enum MusicQuality: String, CaseIterable, Identifiable, Sendable {
         case .hires: "999"
         }
     }
+
+    /// Prefer the user's choice when the JS script advertises it, then
+    /// gracefully fall back to a format that the script actually supports.
+    /// Scripts with no quality metadata retain the previous 320k default.
+    func lxQuality(supported: [String]) -> String {
+        guard !supported.isEmpty else { return "320k" }
+        let priority: [String]
+        switch self {
+        case .standard:
+            priority = ["128k", "320k", "flac", "flac24bit"]
+        case .high:
+            priority = ["320k", "128k", "flac", "flac24bit"]
+        case .lossless:
+            priority = ["flac", "flac24bit", "320k", "128k"]
+        case .hires:
+            priority = ["flac24bit", "flac", "320k", "128k"]
+        }
+        return priority.first(where: { supported.contains($0) }) ?? supported[0]
+    }
 }
 
 /// Describes why a collection appeared in a platform catalog. Search results are
