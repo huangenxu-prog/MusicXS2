@@ -1047,28 +1047,6 @@ struct ContentView: View {
                     .foregroundStyle(.white.opacity(0.90))
             }
             Spacer(minLength: 8)
-            Menu {
-                Button {
-                    appearanceMode = "classic"
-                } label: {
-                    Label("经典版", systemImage: appearanceMode == "classic" ? "checkmark.circle.fill" : "moon.stars")
-                }
-                Button {
-                    appearanceMode = "light"
-                } label: {
-                    Label("浅色版", systemImage: appearanceMode == "light" ? "checkmark.circle.fill" : "sun.max")
-                }
-            } label: {
-                Label("皮肤", systemImage: "paintbrush")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 12)
-                    .frame(height: 36)
-                    .background(.white.opacity(0.19), in: Capsule())
-                    .overlay(Capsule().stroke(.white.opacity(0.34), lineWidth: 0.8))
-                    .contentShape(Capsule())
-            }
-            .accessibilityLabel("切换皮肤")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: 122, alignment: .bottom)
