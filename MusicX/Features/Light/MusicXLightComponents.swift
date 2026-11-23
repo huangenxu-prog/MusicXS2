@@ -235,7 +235,7 @@ struct MXLightHome: View {
                         ProgressView("正在加载新歌").tint(MXLight.teal)
                     } else {
                         ForEach(Array(songs.prefix(5).enumerated()), id: \.element.id) { index, track in
-                            MXLightTrackRow(track: track, index: index) { onSong(track.id) }
+                            MXLightTrackRow(track: track, index: index, onPlay: { onSong(track.id) })
                         }
                     }
                 }
@@ -387,7 +387,7 @@ struct MXLightSearch: View {
                 } else {
                     MXLightSectionTitle(title: isLoading ? "正在搜索…" : "歌曲 · \(songs.count)")
                     ForEach(Array(songs.enumerated()), id: \.element.id) { i, song in
-                        MXLightTrackRow(track: song, index: i) { onSong(song.id) }
+                        MXLightTrackRow(track: song, index: i, onPlay: { onSong(song.id) })
                     }
                     if songs.isEmpty && !isLoading {
                         Text("暂时没有匹配歌曲").font(.system(size: 14)).foregroundStyle(MXLight.muted)
