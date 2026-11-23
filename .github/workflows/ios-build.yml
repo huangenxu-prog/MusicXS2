@@ -31,7 +31,9 @@ jobs:
 
       - name: Test library playback queue
         run: |
-          swiftc MusicX/Features/Home/LibraryQueue.swift tests/main.swift -o /tmp/test-library-queue
+          swiftc MusicX/Features/Home/LibraryQueue.swift \
+            MusicX/MusicSources/MusicSourceModels.swift \
+            tests/main.swift -o /tmp/test-library-queue
           /tmp/test-library-queue
 
       - name: Install XcodeGen
