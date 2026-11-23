@@ -41,7 +41,7 @@ struct MXReferencePlayer: View {
             Group {
                 switch mode {
                 case "lyrics": lyricPage
-                case "queue": queuePage
+                case "queue": playerPage(size: geom.size)
                 default: playerPage(size: geom.size)
                 }
             }
@@ -49,6 +49,15 @@ struct MXReferencePlayer: View {
             .background(MXLight.background.ignoresSafeArea())
         }
         .preferredColorScheme(.light)
+        .sheet(isPresented: Binding(
+            get: { mode == "queue" },
+            set: { if !$0 && mode == "queue" { mode = "artwork" } }
+        )) {
+            queueSheet
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(25)
+        }
         .simultaneousGesture(
             DragGesture(minimumDistance: 24, coordinateSpace: .global)
                 .onEnded { gesture in
@@ -304,15 +313,16 @@ struct MXReferencePlayer: View {
         }
     }
 
-    private var queuePage: some View {
+    /// A queue is a temporary overlay on the player, not a second full-screen
+    /// navigation destination. Keep the player and its audio state underneath.
+    private var queueSheet: some View {
         VStack(spacing: 0) {
-            header("播放队列") { mode = "artwork" }
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("接下来播放")
-                        .font(.system(size: 19, weight: .bold))
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("播放队列")
+                        .font(.system(size: 21, weight: .bold))
                         .foregroundStyle(MXLight.ink)
-                    Text("共 \(upNext.count) 首 · 长按把手调整顺序")
+                    Text("接下来 \(upNext.count) 首")
                         .font(.system(size: 12))
                         .foregroundStyle(MXLight.muted)
                 }
@@ -320,94 +330,150 @@ struct MXReferencePlayer: View {
                 Button {
                     showingClearQueueConfirmation = true
                 } label: {
-                    Label("清空", systemImage: "trash")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(MXLight.red)
-                        .frame(minWidth: 62, minHeight: 44)
+                    Text("清空")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(upNext.isEmpty ? MXLight.muted : MXLight.red)
+                        .frame(minWidth: 52, minHeight: 44)
                 }
                 .disabled(upNext.isEmpty)
-                .accessibilityLabel("清空待播放歌曲")
+                .accessibilityLabel("清空待播队列")
             }
-            .padding(.horizontal, 24)
-            .padding(.top, 10)
+            .padding(.horizontal, 23)
+            .padding(.top, 25)
             .padding(.bottom, 12)
-            MXLight.line.frame(height: 0.5)
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 18) {
-                    if let song {
-                        VStack(alignment: .leading, spacing: 9) {
-                            Text("正在播放")
+
+            HStack(spacing: 11) {
+                Button(action: onShuffle) {
+                    Label("随机播放", systemImage: "shuffle")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(shuffle ? MXLight.red : MXLight.ink)
+                        .padding(.horizontal, 14).frame(height: 38)
+                        .background(shuffle ? MXLight.pink.opacity(0.5) : MXLight.cream,
+                                    in: Capsule())
+                }
+                .accessibilityLabel(shuffle ? "关闭随机播放" : "开启随机播放")
+                Button(action: onRepeat) {
+                    Label(repeatMode == 2 ? "单曲循环" :
+                          repeatMode == 1 ? "列表循环" : "顺序播放",
+                          systemImage: repeatMode == 2 ? "repeat.1" : "repeat")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(repeatMode == 0 ? MXLight.ink : MXLight.red)
+                        .padding(.horizontal, 14).frame(height: 38)
+                        .background(repeatMode == 0 ? MXLight.cream :
+                                    MXLight.pink.opacity(0.5), in: Capsule())
+                }
+                Spacer(minLength: 0)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 23)
+            .padding(.bottom, 14)
+
+            if let song {
+                VStack(spacing: 8) {
+                    HStack(spacing: 11) {
+                        MXLightArtwork(url: song.artworkURL, size: 44, variant: 2)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(song.title)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(MXLight.red)
+                                .lineLimit(1)
+                            Text(song.artist)
                                 .font(.system(size: 12))
                                 .foregroundStyle(MXLight.muted)
-                            HStack(spacing: 11) {
-                                MXLightArtwork(url: song.artworkURL, size: 48, variant: 2)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(song.title)
-                                        .font(.system(size: 15, weight: .semibold))
-                                        .foregroundStyle(MXLight.red)
-                                        .lineLimit(1)
-                                    Text(song.artist)
-                                        .font(.system(size: 12)).foregroundStyle(MXLight.muted)
-                                }
-                                Spacer()
-                                Text(time(song.duration ?? duration))
-                                    .font(.system(size: 12)).foregroundStyle(MXLight.muted)
-                            }
+                                .lineLimit(1)
                         }
-                        .padding(15)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(MXLight.cream, in: RoundedRectangle(cornerRadius: 16))
+                        Spacer(minLength: 8)
+                        Text(duration > 0
+                             ? "已播放 \(time(currentTime)) / \(time(duration))"
+                             : "正在播放")
+                            .font(.system(size: 11))
+                            .foregroundStyle(MXLight.muted)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                     }
-                     List {
-                        ForEach(Array(upNext.enumerated()), id: \.element.id) { index, track in
+                    ProgressView(value: duration > 0
+                                 ? min(max(currentTime / duration, 0), 1) : 0)
+                        .tint(MXLight.red)
+                }
+                .padding(13)
+                .background(MXLight.cream, in: RoundedRectangle(cornerRadius: 15))
+                .padding(.horizontal, 23)
+                .padding(.bottom, 11)
+            }
+
+            if upNext.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "music.note.list")
+                        .font(.system(size: 28))
+                    Text("待播队列为空")
+                        .font(.system(size: 15))
+                    Text("从歌曲菜单中添加歌曲，或播放一个歌单。")
+                        .font(.system(size: 12))
+                }
+                .foregroundStyle(MXLight.muted)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(Array(upNext.enumerated()), id: \.element.id) { index, track in
+                        HStack(spacing: 9) {
                             Button { onQueuePlay(track.id) } label: {
                                 HStack(spacing: 11) {
-                                    MXLightArtwork(url: track.artworkURL, size: 48, variant: index)
-                                    VStack(alignment: .leading, spacing: 5) {
+                                    MXLightArtwork(url: track.artworkURL,
+                                                   size: 43, variant: index)
+                                    VStack(alignment: .leading, spacing: 4) {
                                         Text(track.title)
-                                            .font(.system(size: 15, weight: .semibold))
-                                            .foregroundStyle(MXLight.ink).lineLimit(1)
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundStyle(MXLight.ink)
+                                            .lineLimit(1)
                                         Text(track.artist)
-                                            .font(.system(size: 12)).foregroundStyle(MXLight.muted)
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(MXLight.muted)
                                             .lineLimit(1)
                                     }
-                                    Spacer()
-                                    Menu {
-                                        Button("播放", systemImage: "play.fill") { onQueuePlay(track.id) }
-                                        Button("从队列移除", systemImage: "trash", role: .destructive) {
-                                            onRemoveQueue(track.id)
-                                        }
-                                    } label: {
-                                        Image(systemName: "ellipsis")
-                                            .foregroundStyle(MXLight.muted)
-                                            .frame(width: 26, height: 42)
-                                    }
+                                    Spacer(minLength: 0)
                                 }
+                                .contentShape(Rectangle())
                             }
-                            .listRowBackground(MXLight.background)
-                            .listRowSeparator(.hidden)
+                            .buttonStyle(.plain)
+                            Menu {
+                                Button("立即播放", systemImage: "play.fill") {
+                                    onQueuePlay(track.id)
+                                }
+                                Button("从队列移除", systemImage: "trash", role: .destructive) {
+                                    onRemoveQueue(track.id)
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis")
+                                    .font(.system(size: 19))
+                                    .foregroundStyle(MXLight.muted)
+                                    .frame(width: 32, height: 44)
+                            }
                         }
-                        .onMove(perform: onMoveQueue)
+                        .listRowBackground(MXLight.background)
+                        .listRowSeparator(.hidden)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button("移除", role: .destructive) {
+                                onRemoveQueue(track.id)
+                            }
+                        }
                     }
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
-                    .environment(\.editMode, .constant(.active))
-                    .frame(height: CGFloat(upNext.count) * 63 + 10)
-                    .scrollDisabled(true)
-
-                 }
-                .padding(.horizontal, 24)
-                .padding(.top, 12)
-                .padding(.bottom, 22)
+                    .onMove(perform: onMoveQueue)
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .environment(\.editMode, .constant(.active))
+                .padding(.horizontal, 9)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(MXLight.background.ignoresSafeArea())
         .confirmationDialog("清空待播队列？",
                             isPresented: $showingClearQueueConfirmation,
                             titleVisibility: .visible) {
             Button("清空待播歌曲", role: .destructive, action: onClearQueue)
             Button("取消", role: .cancel) {}
         } message: {
-            Text("仅清除待播放歌曲，不停止当前歌曲。")
+            Text("当前歌曲会继续播放；仅清除接下来的歌曲。")
         }
     }
 
