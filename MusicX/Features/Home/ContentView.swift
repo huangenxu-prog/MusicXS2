@@ -372,14 +372,9 @@ struct ContentView: View {
             .sheet(isPresented: $isLightSettingsPresented) {
                 MXLightSettings(
                     appearance: $appearanceMode,
-                    onQuality: { isLightSettingsPresented = false; isLightQualityPickerPresented = true },
                     onSources: { isLightSettingsPresented = false; isLightSourceAuthPresented = true },
                     onBackup: { isLightSettingsPresented = false; exportMusicBackup() },
-                    onRestore: { isLightSettingsPresented = false; isBackupImportPresented = true },
-                    onImportPlaylist: {
-                        isLightSettingsPresented = false
-                        isLightPlaylistImportPresented = true
-                    })
+                    onRestore: { isLightSettingsPresented = false; isBackupImportPresented = true })
             }
             .sheet(isPresented: $isLightPlaylistImportPresented) {
                 lightPlaylistImportSheet
@@ -1539,8 +1534,8 @@ struct ContentView: View {
                         }
                         Divider()
                         Menu {
-                            Button("经典深色版") { appearanceMode = "classic" }
-                            Button("暖色浅色版") { appearanceMode = "light" }
+                            Button("经典版") { appearanceMode = "classic" }
+                            Button("浅色版") { appearanceMode = "light" }
                         } label: {
                             Label("外观主题", systemImage: "paintbrush")
                         }
