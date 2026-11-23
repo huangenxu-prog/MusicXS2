@@ -21,6 +21,7 @@ final class PlayerStore: ObservableObject {
     @Published private(set) var playbackDiagnostics = "等待播放"
 
     private let player = AVPlayer()
+    private var currentStreamURL: URL?
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var interruptionObserver: NSObjectProtocol?
@@ -351,6 +352,7 @@ final class PlayerStore: ObservableObject {
         wantsPlayback = true
         hasPublishedDuration = false
         configureAudioSession()
+        currentStreamURL = url
         let item = AVPlayerItem(url: url)
         observeCurrentItem(item)
         player.replaceCurrentItem(with: item)
@@ -425,39 +427,36 @@ final class PlayerStore: ObservableObject {
 
     func togglePlayback() { wantsPlayback ? pause() : resume() }
 
-    /// Single-track repeat must not leave AVPlayer in its automatic pause-at-end
-    /// state. This is configured independently of shuffle and queue-repeat.
+    /// End-of-item notifications are needed for every repeat mode. Do not set
+    /// .none here: that leaves some streams parked at EOF without a new item.
     func setRepeatOneEnabled(_ enabled: Bool) {
-        player.actionAtItemEnd = enabled ? .none : .pause
+        player.actionAtItemEnd = .pause
+        recordDiagnostic(enabled ? "repeat-one-enabled" : "repeat-one-disabled")
     }
 
-    /// Restart even when a streaming item has an unknown or delayed duration.
-    /// Seek the PLAYER (not the finished AVPlayerItem) before resuming audio.
-    func replayCurrentTrack() {
-        guard let item = player.currentItem else { return }
-        do {
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch {
-            errorMessage = "无法恢复音频会话：\(error.localizedDescription)"
-            return
-        }
+    /// Recreate a fresh AVPlayerItem from the selected stream on natural end.
+    /// Seeking a completed network AVPlayerItem is not reliable on all providers.
+    /// If this URL has expired, regular playback failure handling resolves a new URL.
+    @discardableResult
+    func replayCurrentTrack() -> Bool {
+        guard let url = currentStreamURL, player.currentItem != nil else { return false }
+        seekRequestID = UUID()
         wantsPlayback = true
         isPlaying = false
         isBuffering = true
         errorMessage = nil
-        seekRequestID = UUID()
-        let requestID = seekRequestID
-        player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self, weak item] finished in
-            Task { @MainActor [weak self, weak item] in
-                guard let self, let item, finished,
-                      self.player.currentItem === item,
-                      self.seekRequestID == requestID,
-                      self.wantsPlayback else { return }
-                self.player.playImmediately(atRate: 1.0)
-                self.currentTime = 0
-                self.updateNowPlayingInfo()
-            }
-        }
+        currentTime = 0
+        duration = 0
+        hasPublishedDuration = false
+        didRecordPlaybackStart = false
+        configureAudioSession()
+        let newItem = AVPlayerItem(url: url)
+        observeCurrentItem(newItem)
+        player.replaceCurrentItem(with: newItem)
+        recordDiagnostic("repeat-one-new-item")
+        player.playImmediately(atRate: 1.0)
+        updateNowPlayingInfo()
+        return true
     }
 
     func seek(to seconds: TimeInterval) {
