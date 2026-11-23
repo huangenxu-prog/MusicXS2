@@ -255,6 +255,7 @@ struct ContentView: View {
     @State private var isLoadingHomeSongs = false
     @State private var homeLoadError: String?
     @State private var discoveryRoute: MusicDiscoveryRoute?
+    @State private var lightRouteHistory: [MusicDiscoveryRoute] = []
     @State private var isDiscoveryPopping = false
     @State private var isSettingsAlertPresented = false
     @State private var isLXSourceTestPresented = false
@@ -513,17 +514,9 @@ struct ContentView: View {
                     MXLightDetail(
                         route: route,
                         favorites: favoriteSongs.compactMap(\.onlineSong),
-                        onBack: {
-                            withAnimation(.easeInOut(duration: 0.28)) {
-                                discoveryRoute = nil
-                            }
-                        },
+                        onBack: popLightRoute,
                         onPlay: { song, tracks in playCollectionTrack(song, in: tracks) },
-                        onOpen: { nextRoute in
-                            withAnimation(.easeInOut(duration: 0.28)) {
-                                discoveryRoute = nextRoute
-                            }
-                        },
+                        onOpen: pushLightRoute,
                         isFavorite: { track in favorites.contains(stableSongID(track)) },
                         onFavorite: { track in toggleFavorite(appSong(from: track)) }
                     )
@@ -607,8 +600,8 @@ struct ContentView: View {
             // pop exits to the right. A transient back-navigation flag must
             // not reverse a newly inserted page during the same animation.
             .transition(.asymmetric(
-                insertion: .move(edge: .trailing),
-                removal: .move(edge: .trailing)
+                insertion: .move(edge: appearanceMode == "light" && isDiscoveryPopping ? .leading : .trailing),
+                removal: .move(edge: appearanceMode == "light" && !isDiscoveryPopping ? .leading : .trailing)
             ))
             .zIndex(30)
         }
@@ -629,6 +622,25 @@ struct ContentView: View {
         }
     }
 
+
+    private func pushLightRoute(_ next: MusicDiscoveryRoute) {
+        isDiscoveryPopping = false
+        if let current = discoveryRoute { lightRouteHistory.append(current) }
+        withAnimation(.easeInOut(duration: 0.28)) {
+            discoveryRoute = next
+        }
+    }
+
+    private func popLightRoute() {
+        isDiscoveryPopping = true
+        withAnimation(.easeInOut(duration: 0.28)) {
+            if let previous = lightRouteHistory.popLast() {
+                discoveryRoute = previous
+            } else {
+                discoveryRoute = nil
+            }
+        }
+    }
 
     // Warm-light views are fed by the SAME store and song queue as classic mode.
     private func lightSong(_ track: AppSong) -> MXLightTrack {
