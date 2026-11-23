@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import AVFoundation
 
 private struct MXReferenceSourceDocument: FileDocument {
     static var readableContentTypes: [UTType] { [.json] }
@@ -17,18 +18,29 @@ private struct MXReferenceSourceDocument: FileDocument {
     }
 }
 
-/// Light reference screen 13. The existing LXSourceLibrary remains the sole source of truth.
-/// The advanced script inspection / playback approval flow stays in LXSourceTestPanel.
+/// Warm-light source manager. Shares the real LXSourceLibrary and its cloud
+/// location with the existing advanced panel. No extra source configuration.
 struct MXReferenceSources: View {
-    @Environment(\.dismiss) private var dismiss
+    let onPreviewStart: () -> Void
 
+    @Environment(\.dismiss) private var dismiss
     private struct SourceItem: Identifiable {
         let id: String
         let name: String
         let platforms: Set<String>
         let approved: Bool
+        var isEnabled: Bool { approved && !platforms.isEmpty }
     }
+    private struct TestHit: Identifiable {
+        let platform: String
+        let displayName: String
+        let song: MusicSong?
+        let error: String?
+        var id: String { platform }
+    }
+
     @State private var sourceItems: [SourceItem] = []
+    @State private var isSourceListExpanded = false
     @State private var message: String?
     @State private var isSyncing = false
     @State private var showJSImporter = false
@@ -39,8 +51,22 @@ struct MXReferenceSources: View {
     @State private var remoteURL = ""
     @State private var backupDocument: MXReferenceSourceDocument?
 
+    @State private var testKeyword = ""
+    @State private var isSearching = false
+    @State private var testHits: [TestHit] = []
+    @State private var previewPlayer: AVPlayer?
+    @State private var previewPlatform: String?
+    @State private var previewLoadingPlatform: String?
+    @State private var previewRequestID = UUID()
+    @State private var previewEndObserver: NSObjectProtocol?
+
     private let cloudURL =
         "https://raw.githubusercontent.com/huangenxu-prog/MusicXS2/test/build-486-complete-source/MusicX/CloudSources.json"
+
+    private let platforms: [(id: String, title: String, source: MusicSource)] = [
+        ("tx", "QQ 音乐", .qq), ("wy", "网易云", .netease),
+        ("kw", "酷我音乐", .kuwo), ("kg", "酷狗音乐", .kugou)
+    ]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -50,123 +76,292 @@ struct MXReferenceSources: View {
                         .frame(width: 40, height: 42, alignment: .leading)
                 }
                 Spacer()
-                Text("音源管理").font(.system(size: 16, weight: .bold))
+                Text("音源管理")
+                    .font(.system(size: 16, weight: .semibold))
                 Spacer()
-                // Advanced testing has one explicit row below; no duplicate top menu.
                 Color.clear.frame(width: 40, height: 42)
                     .accessibilityHidden(true)
             }
-            .font(.system(size: 19))
             .foregroundStyle(MXLight.ink)
+            .font(.system(size: 19))
             .padding(.horizontal, 24)
+            .padding(.top, 6)
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("云端同步会更新本地音源配置。新导入的 JS 音源需先通过试听验证，才能用于正式播放。")
-                        .font(.system(size: 12))
+                    Text("云端同步、音源导入与试听")
+                        .font(.system(size: 13))
                         .foregroundStyle(MXLight.muted)
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(MXLight.cream, in: RoundedRectangle(cornerRadius: 13))
+                        .padding(.bottom, 19)
 
-                    VStack(spacing: 0) {
-                        actionRow("云端同步音源", icon: "cloud") {
+                    HStack(spacing: 10) {
+                        actionTile("云端同步", detail: "同步音源配置",
+                                   symbol: "cloud", color: MXLight.ochre) {
                             Task { await syncCloud() }
                         }
-                        MXLight.line.frame(height: 0.5)
                         Menu {
-                            Button("从文件导入 JS 音源", systemImage: "doc") {
+                            Button("从文件导入 JS", systemImage: "doc") {
                                 showJSImporter = true
                             }
-                            Button("从网址导入 JS 音源", systemImage: "link") {
+                            Button("从网址导入 JS", systemImage: "link") {
                                 remoteURL = ""
                                 showURLImporter = true
                             }
                         } label: {
-                            actionLabel("导入音源", icon: "plus")
+                            tileLabel("导入音源", detail: "文件 / 链接",
+                                      symbol: "square.and.arrow.down",
+                                      color: MXLight.lightTeal)
                         }
-                        MXLight.line.frame(height: 0.5)
-                        actionRow("音源测试与高级管理", icon: "checkmark.shield") {
-                            showAdvanced = true
-                        }
-                        MXLight.line.frame(height: 0.5)
                         Menu {
-                            Button("导出音源配置备份", systemImage: "square.and.arrow.up",
+                            Button("导出音源配置", systemImage: "square.and.arrow.up",
                                    action: exportBackup)
                             Button("从本地备份恢复", systemImage: "square.and.arrow.down") {
                                 showBackupImporter = true
                             }
                         } label: {
-                            actionLabel("音源配置备份", icon: "externaldrive")
+                            tileLabel("配置备份", detail: "导出 / 恢复",
+                                      symbol: "square.stack", color: MXLight.cream)
                         }
                     }
-                    .padding(.horizontal, 14)
-                    .background(MXLight.paper, in: RoundedRectangle(cornerRadius: 18))
-                    .padding(.top, 20)
-
                     if isSyncing {
                         ProgressView("正在同步音源")
-                            .tint(MXLight.teal).padding(.vertical, 14)
+                            .tint(MXLight.teal)
+                            .padding(.top, 15)
                     }
                     if let message {
                         Text(message)
                             .font(.system(size: 12))
                             .foregroundStyle(MXLight.muted)
-                            .padding(.top, 12)
+                            .padding(.top, 14)
                     }
 
-                    section("已导入音源", right: "\(sourceItems.count) 条")
-                    if sourceItems.isEmpty {
-                        Text("尚未导入音源")
-                            .font(.system(size: 13))
-                            .foregroundStyle(MXLight.muted)
-                            .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
-                    }
-                    ForEach(Array(sourceItems.enumerated()), id: \.element.id) { i, item in
-                        HStack(spacing: 11) {
-                            Image(systemName: "music.note")
-                                .font(.system(size: 17))
-                                .foregroundStyle(i % 2 == 0 ? MXLight.teal : MXLight.ink)
-                                .frame(width: 34, height: 34)
-                                .background(i % 2 == 0 ? MXLight.lightTeal :
-                                             MXLight.cream, in: Circle())
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(item.name)
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(MXLight.ink).lineLimit(1)
-                                Text(item.approved
-                                     ? displayPlatforms(item.platforms)
-                                     : "待试听验证 · 尚未正式启用")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(MXLight.muted)
-                                    .lineLimit(1)
+                    VStack(spacing: 0) {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.22)) {
+                                isSourceListExpanded.toggle()
                             }
-                            Spacer()
-                            Toggle(item.name, isOn: Binding(
-                                get: { item.approved && !item.platforms.isEmpty },
-                                set: { enabled in setSource(item.id, enabled: enabled) }
-                            ))
-                            .labelsHidden()
-                            .tint(MXLight.teal)
-                            .disabled(!item.approved)
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "music.note")
+                                    .font(.system(size: 19))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 43, height: 43)
+                                    .background(MXLight.teal, in: RoundedRectangle(cornerRadius: 12))
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text("音源列表")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundStyle(MXLight.ink)
+                                    Text("已启用 \(enabledCount) / \(sourceItems.count)")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(MXLight.muted)
+                                }
+                                Spacer(minLength: 0)
+                                Image(systemName: isSourceListExpanded ? "chevron.up" : "chevron.down")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(MXLight.ink)
+                            }
+                            .frame(minHeight: 63)
+                            .contentShape(Rectangle())
                         }
-                        .padding(.vertical, 9)
-                        MXLight.line.frame(height: 0.5)
-                    }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(isSourceListExpanded ? "收起音源列表" : "展开音源列表")
 
-                    Text("已批准的音源可直接启停；测试、平台通道细节与删除操作统一在「音源测试与高级管理」中处理。")
-                        .font(.system(size: 11))
-                        .foregroundStyle(MXLight.muted)
-                        .padding(.top, 18)
+                        if isSourceListExpanded {
+                            MXLight.line.frame(height: 0.5)
+                                .padding(.vertical, 7)
+                            if sourceItems.isEmpty {
+                                Text("暂无音源，先导入或从云端同步")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(MXLight.muted)
+                                    .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+                            } else {
+                                ForEach(Array(sourceItems.enumerated()), id: \.element.id) { index, item in
+                                    Button { toggleSource(item) } label: {
+                                        HStack(spacing: 10) {
+                                            Image(systemName: "music.note")
+                                                .font(.system(size: 15))
+                                                .foregroundStyle(MXLight.teal)
+                                                .frame(width: 30, height: 30)
+                                                .background(MXLight.lightTeal, in: Circle())
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(item.name)
+                                                    .font(.system(size: 14, weight: .medium))
+                                                    .foregroundStyle(MXLight.ink)
+                                                    .lineLimit(1)
+                                                Text(item.approved
+                                                     ? displayPlatforms(item.platforms)
+                                                     : "待试听批准")
+                                                    .font(.system(size: 11))
+                                                    .foregroundStyle(MXLight.muted)
+                                                    .lineLimit(1)
+                                            }
+                                            Spacer(minLength: 6)
+                                            Image(systemName: item.isEnabled
+                                                  ? "checkmark.circle.fill" : "circle")
+                                                .font(.system(size: 24))
+                                                .foregroundStyle(item.isEnabled
+                                                                 ? MXLight.teal : MXLight.muted)
+                                        }
+                                        .frame(minHeight: 53)
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("\(item.name)，\(item.isEnabled ? "已启用" : "未启用")，点击切换")
+                                    if index < sourceItems.count - 1 {
+                                        MXLight.line.frame(height: 0.5)
+                                    }
+                                }
+                            }
+                            Text("点击音源即可勾选启停；未批准的脚本需在高级管理中先通过试听。")
+                                .font(.system(size: 11))
+                                .foregroundStyle(MXLight.muted)
+                                .padding(.top, 8)
+                        }
+                    }
+                    .padding(16)
+                    .background(MXLight.paper, in: RoundedRectangle(cornerRadius: 19))
+                    .padding(.top, 22)
+
+                    VStack(alignment: .leading, spacing: 15) {
+                        HStack {
+                            Text("音源测试")
+                                .font(.system(size: 19, weight: .bold))
+                                .foregroundStyle(MXLight.ink)
+                            Spacer()
+                            Button {
+                                showAdvanced = true
+                            } label: {
+                                Image(systemName: "info.circle")
+                                    .font(.system(size: 18))
+                                    .foregroundStyle(MXLight.muted)
+                                    .frame(width: 38, height: 38)
+                            }
+                            .accessibilityLabel("高级音源测试")
+                        }
+                        HStack(spacing: 9) {
+                            HStack(spacing: 9) {
+                                Image(systemName: "magnifyingglass")
+                                    .foregroundStyle(MXLight.ink)
+                                TextField("输入歌曲名", text: $testKeyword)
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(MXLight.ink)
+                                    .tint(MXLight.red)
+                                    .autocorrectionDisabled()
+                                    .submitLabel(.search)
+                                    .onSubmit { Task { await searchFourPlatforms() } }
+                                if !testKeyword.isEmpty {
+                                    Button { testKeyword = "" } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .foregroundStyle(MXLight.muted)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .frame(height: 45)
+                            .background(MXLight.background, in: Capsule())
+
+                            Button {
+                                Task { await searchFourPlatforms() }
+                            } label: {
+                                if isSearching {
+                                    ProgressView().tint(.white)
+                                        .frame(width: 54, height: 45)
+                                } else {
+                                    Text("测试")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .frame(width: 54, height: 45)
+                                }
+                            }
+                            .foregroundStyle(.white)
+                            .background(MXLight.red, in: Capsule())
+                            .disabled(isSearching || testKeyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+
+                        if testHits.isEmpty && !isSearching {
+                            Text("输入歌名，展示 QQ、网易云、酷我、酷狗各一条匹配结果。")
+                                .font(.system(size: 12))
+                                .foregroundStyle(MXLight.muted)
+                                .padding(.vertical, 5)
+                        } else {
+                            Text(isSearching ? "正在搜索四个平台…" : "点击歌曲试听")
+                                .font(.system(size: 12))
+                                .foregroundStyle(MXLight.muted)
+                        }
+
+                        ForEach(testHits) { hit in
+                            if let song = hit.song {
+                                Button {
+                                    Task { await togglePreview(hit) }
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        MXLightArtwork(url: song.artworkURL,
+                                                       size: 49,
+                                                       variant: platforms.firstIndex(where: {
+                                                           $0.id == hit.platform
+                                                       }) ?? 0)
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(song.title)
+                                                .font(.system(size: 14, weight: .semibold))
+                                                .foregroundStyle(MXLight.ink)
+                                                .lineLimit(1)
+                                            Text(song.artist)
+                                                .font(.system(size: 12))
+                                                .foregroundStyle(MXLight.muted)
+                                                .lineLimit(1)
+                                        }
+                                        Spacer(minLength: 5)
+                                        Text(hit.displayName)
+                                            .font(.system(size: 10, weight: .medium))
+                                            .foregroundStyle(MXLight.teal)
+                                            .padding(.horizontal, 7)
+                                            .padding(.vertical, 5)
+                                            .background(MXLight.lightTeal, in: Capsule())
+                                        Group {
+                                            if previewLoadingPlatform == hit.platform {
+                                                ProgressView().tint(MXLight.teal)
+                                            } else {
+                                                Image(systemName: previewPlatform == hit.platform
+                                                      ? "pause.circle" : "play.circle")
+                                                    .font(.system(size: 27))
+                                                    .foregroundStyle(MXLight.teal)
+                                            }
+                                        }
+                                        .frame(width: 32, height: 42)
+                                    }
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("试听 \(hit.displayName) 的 \(song.title)")
+                            } else {
+                                HStack {
+                                    Text(hit.displayName)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(MXLight.ink)
+                                    Spacer()
+                                    Text(hit.error == nil ? "暂无匹配" : "检索失败")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(MXLight.muted)
+                                }
+                                .frame(minHeight: 43)
+                            }
+                        }
+                        Text("平台标签表示搜索来源；实际试听链接可能由已启用音源自动回退补全。")
+                            .font(.system(size: 11))
+                            .foregroundStyle(MXLight.muted)
+                    }
+                    .padding(17)
+                    .background(MXLight.paper, in: RoundedRectangle(cornerRadius: 19))
+                    .padding(.top, 18)
                 }
-                .padding(.horizontal, 24)
-                .padding(.top, 20)
+                .padding(.horizontal, 22)
+                .padding(.top, 18)
                 .padding(.bottom, 30)
             }
         }
         .background(MXLight.background.ignoresSafeArea())
         .preferredColorScheme(.light)
         .onAppear(perform: reload)
+        .onDisappear(perform: stopPreview)
         .sheet(isPresented: $showAdvanced, onDismiss: reload) {
             LXSourceTestPanel().preferredColorScheme(.dark)
         }
@@ -219,39 +414,34 @@ struct MXReferenceSources: View {
         }
     }
 
-    private func section(_ title: String, right: String? = nil) -> some View {
-        HStack {
-            Text(title).font(.system(size: 15, weight: .bold))
-                .tracking(1.4).foregroundStyle(MXLight.headingMuted)
-            Spacer()
-            if let right {
-                Text(right).font(.system(size: 12)).foregroundStyle(MXLight.muted)
-            }
+    private var enabledCount: Int { sourceItems.filter(\.isEnabled).count }
+
+    private func tileLabel(_ title: String, detail: String, symbol: String, color: Color) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 24, weight: .regular))
+                .foregroundStyle(MXLight.teal)
+            Text(title)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(MXLight.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+            Text(detail)
+                .font(.system(size: 11))
+                .foregroundStyle(MXLight.muted)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
         }
-        .padding(.top, 25)
-        .padding(.bottom, 13)
+        .frame(maxWidth: .infinity)
+        .frame(height: 104)
+        .background(color, in: RoundedRectangle(cornerRadius: 18))
+        .contentShape(RoundedRectangle(cornerRadius: 18))
     }
 
-    private func actionLabel(_ title: String, icon: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 17))
-                .frame(width: 34, height: 34)
-                .background(MXLight.cream, in: Circle())
-            Text(title).font(.system(size: 14, weight: .semibold))
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.system(size: 13))
-        }
-        .foregroundStyle(MXLight.ink)
-        .frame(height: 57)
-        .contentShape(Rectangle())
-    }
-
-    private func actionRow(_ title: String, icon: String,
-                           action: @escaping () -> Void) -> some View {
+    private func actionTile(_ title: String, detail: String, symbol: String,
+                            color: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            actionLabel(title, icon: icon)
+            tileLabel(title, detail: detail, symbol: symbol, color: color)
         }
         .buttonStyle(.plain)
     }
@@ -270,28 +460,121 @@ struct MXReferenceSources: View {
         }
     }
 
-    @MainActor private func setSource(_ id: String, enabled: Bool) {
+    @MainActor private func toggleSource(_ item: SourceItem) {
+        guard item.approved else {
+            message = "这条音源需要先进入高级管理试听，通过后才能勾选启用。"
+            return
+        }
         do {
             let lib = try LXSourceLibrary()
-            guard lib.isBundled(id: id) ||
-                  lib.approvedIDs.contains(id.lowercased()) else {
-                message = "请先在高级测试中试听并批准该音源。"
-                return
-            }
             for platform in LXSourceLibrary.playbackPlatforms {
-                try lib.setPlatformEnabled(id: id, platform: platform, enabled: enabled)
+                try lib.setPlatformEnabled(id: item.id, platform: platform,
+                                           enabled: !item.isEnabled)
             }
-            message = enabled ? "已启用对应通道" : "已停用对应通道"
             reload()
         } catch {
-            message = "修改失败：\(error.localizedDescription)"
+            message = "更改音源状态失败：\(error.localizedDescription)"
         }
     }
 
     private func displayPlatforms(_ platforms: Set<String>) -> String {
-        if platforms.isEmpty { return "全部停用" }
+        if platforms.isEmpty { return "已停用" }
         let names = ["tx": "QQ", "wy": "网易云", "kw": "酷我", "kg": "酷狗"]
         return platforms.sorted().map { names[$0] ?? $0 }.joined(separator: " · ")
+    }
+
+    @MainActor private func searchFourPlatforms() async {
+        let keyword = testKeyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !keyword.isEmpty && !isSearching else { return }
+        stopPreview()
+        isSearching = true
+        testHits = []
+        defer { isSearching = false }
+
+        var hits: [String: TestHit] = [:]
+        await withTaskGroup(of: (String, MusicSong?, String?).self) { group in
+            for (platform, _, _) in platforms {
+                group.addTask {
+                    let svc = GDStudioMusicSearchService()
+                    do {
+                        let songs: [MusicSong]
+                        switch platform {
+                        case "tx":
+                            songs = try await svc.searchQQSongsNative(keyword: keyword, count: 6)
+                        case "wy":
+                            songs = try await svc.search(keyword: keyword, source: .netease, count: 6)
+                        case "kw":
+                            songs = try await svc.searchKuwoNative(keyword: keyword, count: 6)
+                        default:
+                            songs = try await svc.searchKugouNative(keyword: keyword, count: 6)
+                        }
+                        let exact = songs.first(where: {
+                            $0.title.localizedCaseInsensitiveContains(keyword)
+                        })
+                        return (platform, exact ?? songs.first, nil)
+                    } catch {
+                        return (platform, nil, error.localizedDescription)
+                    }
+                }
+            }
+            for await (platform, song, error) in group {
+                let name = platforms.first(where: { $0.id == platform })?.title ?? platform
+                hits[platform] = TestHit(platform: platform, displayName: name,
+                                         song: song, error: error)
+            }
+        }
+        guard !Task.isCancelled else { return }
+        testHits = platforms.map {
+            hits[$0.id] ?? TestHit(platform: $0.id, displayName: $0.title,
+                                  song: nil, error: nil)
+        }
+    }
+
+    @MainActor private func togglePreview(_ result: TestHit) async {
+        guard let song = result.song else { return }
+        if previewPlatform == result.platform {
+            stopPreview()
+            return
+        }
+        stopPreview()
+        let request = UUID()
+        previewRequestID = request
+        previewLoadingPlatform = result.platform
+        message = nil
+        do {
+            let url = try await LXMusicURLResolver().resolve(song: song, quality: .high)
+            guard previewRequestID == request && !Task.isCancelled else { return }
+            // Keep test playback independent from the user's queue.
+            onPreviewStart()
+            let player = AVPlayer(url: url)
+            previewPlayer = player
+            previewPlatform = result.platform
+            previewLoadingPlatform = nil
+            if let item = player.currentItem {
+                previewEndObserver = NotificationCenter.default.addObserver(
+                    forName: .AVPlayerItemDidPlayToEndTime, object: item,
+                    queue: .main) { _ in
+                        Task { @MainActor in stopPreview() }
+                    }
+            }
+            player.play()
+        } catch {
+            guard previewRequestID == request else { return }
+            previewLoadingPlatform = nil
+            message = "试听失败（\(result.displayName)）：\(error.localizedDescription)"
+        }
+    }
+
+    @MainActor private func stopPreview() {
+        previewRequestID = UUID()
+        previewPlayer?.pause()
+        previewPlayer = nil
+        previewPlatform = nil
+        previewLoadingPlatform = nil
+        if let observer = previewEndObserver {
+            NotificationCenter.default.removeObserver(observer)
+            previewEndObserver = nil
+        }
     }
 
     @MainActor private func syncCloud() async {
@@ -323,8 +606,7 @@ struct MXReferenceSources: View {
                 message = "请输入有效的 HTTPS JS 直链"
                 return
             }
-            let (data, response) = try await URLSession.shared.data(
-                from: url, delegate: nil)
+            let (data, response) = try await URLSession.shared.data(from: url)
             guard let http = response as? HTTPURLResponse,
                   (200..<300).contains(http.statusCode) else {
                 throw URLError(.badServerResponse)
