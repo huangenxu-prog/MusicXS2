@@ -996,6 +996,7 @@ struct MXLightSettings: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("musicx.repeatMode") private var repeatMode = 0
     @AppStorage("musicx.playbackQuality") private var qualityRaw = MusicQuality.high.rawValue
+    @State private var showingLocalQuality = false
 
     private var qualityName: String {
         switch MusicQuality(rawValue: qualityRaw) ?? .high {
@@ -1035,8 +1036,9 @@ struct MXLightSettings: View {
                 VStack(alignment: .leading, spacing: 0) {
                     sectionLabel("播放体验")
                     card {
-                        row("音质选择", icon: "speaker.wave.2", hint: qualityName,
-                            action: onQuality)
+                        row("音质选择", icon: "speaker.wave.2", hint: qualityName) {
+                            showingLocalQuality = true
+                        }
                         MXLight.line.frame(height: 0.5)
                         row("播放顺序", icon: "repeat", hint: orderName) {
                             repeatMode = (repeatMode + 1) % 3
@@ -1095,6 +1097,11 @@ struct MXLightSettings: View {
         }
         .background(MXLight.background.ignoresSafeArea())
         .preferredColorScheme(.light)
+        .sheet(isPresented: $showingLocalQuality) {
+            MXLightQualityPicker(selectedQualityRaw: $qualityRaw)
+                .presentationDetents([.height(405)])
+                .presentationDragIndicator(.hidden)
+        }
     }
 
     private func sectionLabel(_ text: String) -> some View {
