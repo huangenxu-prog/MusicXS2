@@ -592,8 +592,14 @@ struct MXReferenceSources: View {
 
     @MainActor private func searchFourPlatforms() async {
         let keyword = testKeyword.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !keyword.isEmpty && !isSearching else { return }
+        guard !keyword.isEmpty && !isSearching,
+              let selectedSource = testSourceID,
+              sourceItems.contains(where: { $0.id == selectedSource }) else {
+            message = "请先选定一条 JS 音源，再输入歌曲名测试"
+            return
+        }
         stopPreview()
+        testStatusByPlatform = [:]
         isSearching = true
         testHits = []
         defer { isSearching = false }
@@ -630,54 +636,162 @@ struct MXReferenceSources: View {
                                          song: song, error: error)
             }
         }
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, testSourceID == selectedSource else { return }
         testHits = platforms.map {
             hits[$0.id] ?? TestHit(platform: $0.id, displayName: $0.title,
                                   song: nil, error: nil)
         }
     }
 
+    @MainActor private func selectTestSource(_ id: String) {
+        guard sourceItems.contains(where: { $0.id == id }) else { return }
+        stopPreview()
+        testSourceID = id
+        testHits = []
+        testStatusByPlatform = [:]
+        message = nil
+    }
+
+    /// The only resolver used by this test is the user's chosen LX JS script.
+    /// Never use LXMusicURLResolver, MusicResourceEngine or cross-provider fallback.
     @MainActor private func togglePreview(_ result: TestHit) async {
-        guard let song = result.song else { return }
-        if previewPlatform == result.platform {
-            stopPreview()
+        guard let song = result.song, let id = testSourceID else {
+            message = "请先选择一条要测试的 JS 音源"
             return
         }
+        guard previewLoadingPlatform == nil else { return }
+        if previewPlatform == result.platform {
+            stopPreview()
+            testStatusByPlatform[result.platform] = "已停止试听"
+            return
+        }
+
         stopPreview()
         let request = UUID()
         previewRequestID = request
-        previewLoadingPlatform = result.platform
+        let platform = result.platform
+        previewLoadingPlatform = platform
+        testStatusByPlatform[platform] = "正在初始化所选 JS 音源…"
         message = nil
+
         do {
-            let url = try await LXMusicURLResolver().resolve(song: song, quality: .high)
-            guard previewRequestID == request && !Task.isCancelled else { return }
-            // Keep test playback independent from the user's queue.
-            onPreviewStart()
-            let player = AVPlayer(url: url)
+            let library = try LXSourceLibrary()
+            let script = try library.load(id: id)
+            let host = try LXSourceScriptHost(script: script)
+            activeTestHost = host
+            let ready = await host.awaitRegistration(timeout: 8)
+            guard request == previewRequestID, testSourceID == id,
+                  !Task.isCancelled else { return }
+            guard ready else {
+                throw LXSourceScriptHost.HostError.initialization(
+                    "脚本没有成功注册：\(host.lastError ?? "注册超时或没有提供任何平台")")
+            }
+            guard let sourceMeta = host.registeredSources[platform] as? [String: Any] else {
+                let registered = host.registeredSources.keys.sorted().joined(separator: "、")
+                testStatusByPlatform[platform] =
+                    "不支持当前平台（脚本注册：\(registered.isEmpty ? "无" : registered)）"
+                previewLoadingPlatform = nil
+                activeTestHost = nil
+                return
+            }
+
+            let qualities = sourceMeta["qualitys"] as? [String] ?? []
+            let quality = qualities.contains("320k") || qualities.isEmpty
+                ? "320k" : (qualities.contains("128k") ? "128k" : qualities[0])
+            let musicInfo: [String: Any] = [
+                "songmid": song.sourceID,
+                "id": song.sourceID,
+                "name": song.title,
+                "singer": song.artist,
+                "albumName": song.album ?? "",
+                "interval": Int(song.duration ?? 0),
+                "hash": song.hash ?? song.sourceID,
+                "albumId": song.albumID ?? ""
+            ]
+            testStatusByPlatform[platform] = "正在通过这条 JS 音源解析 \(quality)…"
+            let url = try await host.resolve(source: platform, musicInfo: musicInfo,
+                                             quality: quality, timeout: 20)
+            guard request == previewRequestID, testSourceID == id,
+                  !Task.isCancelled else { return }
+
+            // A returned URL alone is not a successful test.
+            testStatusByPlatform[platform] = "取得候选地址，正在验证 AVPlayer 播放…"
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+            try AVAudioSession.sharedInstance().setActive(true)
+            onPreviewStart() // Pause the normal queue so two players cannot overlap.
+            let item = AVPlayerItem(url: url)
+            let player = AVPlayer(playerItem: item)
             previewPlayer = player
-            previewPlatform = result.platform
+            previewPlatform = platform
             previewLoadingPlatform = nil
-            if let item = player.currentItem {
-                previewEndObserver = NotificationCenter.default.addObserver(
-                    forName: .AVPlayerItemDidPlayToEndTime, object: item,
-                    queue: .main) { _ in
-                        Task { @MainActor in stopPreview() }
-                    }
+            previewEndObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
+            ) { _ in
+                Task { @MainActor in
+                    guard previewRequestID == request else { return }
+                    stopPreview()
+                    testStatusByPlatform[platform] = "试听结束"
+                }
             }
             player.play()
+            previewCheckTask = Task { @MainActor in
+                for _ in 0..<12 {
+                    do { try await Task.sleep(for: .seconds(1)) }
+                    catch { return }
+                    guard !Task.isCancelled, previewRequestID == request,
+                          previewPlayer === player, testSourceID == id else { return }
+                    if item.status == .failed {
+                        testStatusByPlatform[platform] =
+                            "播放失败：\(item.error?.localizedDescription ?? "AVPlayer 无法加载此地址")"
+                        stopPreview()
+                        return
+                    }
+                    let position = player.currentTime().seconds
+                    if player.timeControlStatus == .playing,
+                       position.isFinite && position > 0.35 {
+                        // System state proves playback progress, not audible output.
+                        testStatusByPlatform[platform] =
+                            "播放器已启动且进度正常；请确认能听到声音"
+                        testedPlayingPlatform = platform
+                        return
+                    }
+                }
+                guard !Task.isCancelled, previewRequestID == request else { return }
+                testStatusByPlatform[platform] = "播放失败：12 秒内未开始播放"
+                stopPreview()
+            }
         } catch {
             guard previewRequestID == request else { return }
-            previewLoadingPlatform = nil
-            message = "试听失败（\(result.displayName)）：\(error.localizedDescription)"
+            testStatusByPlatform[platform] = "此 JS 音源取链或试听失败：\(error.localizedDescription)"
+            stopPreview()
+        }
+    }
+
+    @MainActor private func approveTestedPlatform(_ platform: String) {
+        guard testedPlayingPlatform == platform, let id = testSourceID,
+              previewPlatform == platform else { return }
+        do {
+            let library = try LXSourceLibrary()
+            try library.approve(id: id, testedPlatform: platform)
+            try library.setPlatformEnabled(id: id, platform: platform, enabled: true)
+            reload()
+            testStatusByPlatform[platform] = "已确认试听并批准此平台"
+            message = "已批准所选 JS 音源的 \(platforms.first(where: { $0.id == platform })?.title ?? platform) 通道"
+        } catch {
+            message = "批准失败：\(error.localizedDescription)"
         }
     }
 
     @MainActor private func stopPreview() {
         previewRequestID = UUID()
+        previewCheckTask?.cancel()
+        previewCheckTask = nil
         previewPlayer?.pause()
         previewPlayer = nil
         previewPlatform = nil
         previewLoadingPlatform = nil
+        testedPlayingPlatform = nil
+        activeTestHost = nil
         if let observer = previewEndObserver {
             NotificationCenter.default.removeObserver(observer)
             previewEndObserver = nil
