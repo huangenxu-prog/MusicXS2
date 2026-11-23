@@ -33,6 +33,7 @@ struct MXReferencePlayer: View {
 
     @State private var isScrubbing = false
     @State private var scrubPosition: Double = 0
+    @State private var showingClearQueueConfirmation = false
 
     var body: some View {
         GeometryReader { geom in
@@ -310,6 +311,31 @@ struct MXReferencePlayer: View {
     private var queuePage: some View {
         VStack(spacing: 0) {
             header("播放队列") { mode = "artwork" }
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("接下来播放")
+                        .font(.system(size: 19, weight: .bold))
+                        .foregroundStyle(MXLight.ink)
+                    Text("共 \(upNext.count) 首 · 长按把手调整顺序")
+                        .font(.system(size: 12))
+                        .foregroundStyle(MXLight.muted)
+                }
+                Spacer()
+                Button {
+                    showingClearQueueConfirmation = true
+                } label: {
+                    Label("清空", systemImage: "trash")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(MXLight.red)
+                        .frame(minWidth: 62, minHeight: 44)
+                }
+                .disabled(upNext.isEmpty)
+                .accessibilityLabel("清空待播放歌曲")
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 10)
+            .padding(.bottom, 12)
+            MXLight.line.frame(height: 0.5)
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 18) {
                     if let song {
@@ -336,17 +362,7 @@ struct MXReferencePlayer: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(MXLight.cream, in: RoundedRectangle(cornerRadius: 16))
                     }
-                    HStack(alignment: .firstTextBaseline) {
-                        Text("接下来播放")
-                            .font(.system(size: 24, weight: .bold))
-                            .foregroundStyle(MXLight.ink)
-                        Spacer()
-                        Text("共 \(max(queue.count - (song == nil ? 0 : 1), 0)) 首")
-                            .font(.system(size: 13)).foregroundStyle(MXLight.muted)
-                    }
-                    Text("按住右侧图标，可以调整播放顺序")
-                        .font(.system(size: 12)).foregroundStyle(MXLight.muted)
-                    List {
+                     List {
                         ForEach(Array(upNext.enumerated()), id: \.element.id) { index, track in
                             Button { onQueuePlay(track.id) } label: {
                                 HStack(spacing: 11) {
@@ -383,17 +399,19 @@ struct MXReferencePlayer: View {
                     .frame(height: CGFloat(upNext.count) * 63 + 10)
                     .scrollDisabled(true)
 
-                    HStack(spacing: 12) {
-                        Button("清空队列", action: onClearQueue)
-                            .buttonStyle(MXReferencePill(isPrimary: false))
-                        Button("返回播放") { mode = "artwork" }
-                            .buttonStyle(MXReferencePill(isPrimary: true))
-                    }
-                }
+                 }
                 .padding(.horizontal, 24)
-                .padding(.top, 20)
+                .padding(.top, 12)
                 .padding(.bottom, 22)
             }
+        }
+        .confirmationDialog("清空待播队列？",
+                            isPresented: $showingClearQueueConfirmation,
+                            titleVisibility: .visible) {
+            Button("清空待播歌曲", role: .destructive, action: onClearQueue)
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("仅清除待播放歌曲，不停止当前歌曲。")
         }
     }
 
