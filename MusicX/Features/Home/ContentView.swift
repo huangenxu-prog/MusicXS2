@@ -2912,11 +2912,13 @@ struct ContentView: View {
 
     private func playLibrarySong(in displayed: [AppSong], at index: Int) {
         let song = displayed[index]
-        if libraryFilter == .favorites, let track = song.onlineSong {
+        // Both Favorites and Recent Plays are playable ordered lists.
+        // An empty standalone queue made Recent Plays stop after one song.
+        if let track = song.onlineSong {
             playCollectionTrack(track, in: displayed.compactMap(\.onlineSong))
             return
         }
-        // An explicitly empty queue represents standalone playback.
+        // Only legacy rows without an online track are standalone.
         installDiscoveryQueue([])
         if currentSong?.id == song.id && (playerStore.isPlaying || isResolvingSong)
             && playerStore.errorMessage == nil && restoredPosition == nil { return }
