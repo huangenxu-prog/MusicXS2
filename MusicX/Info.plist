@@ -5,9 +5,9 @@
     <key>CFBundleDisplayName</key>
     <string>MusicX</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.207</string>
+    <string>2.343</string>
     <key>CFBundleVersion</key>
-    <string>207</string>
+    <string>344</string>
     <key>UILaunchStoryboardName</key>
     <string>LaunchScreen</string>
     <!-- Experimental LX-source test build only: some community scripts use HTTP IP endpoints. Remove before production release. -->
