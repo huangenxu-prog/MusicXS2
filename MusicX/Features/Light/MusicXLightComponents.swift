@@ -1131,9 +1131,7 @@ struct MXLightSettings: View {
     let onSources: () -> Void
     let onBackup: () -> Void
     let onRestore: () -> Void
-    let onImportPlaylist: () -> Void
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("musicx.repeatMode") private var repeatMode = 0
     @AppStorage("musicx.playbackQuality") private var qualityRaw = MusicQuality.high.rawValue
     @State private var showingLocalQuality = false
 
@@ -1145,14 +1143,6 @@ struct MXLightSettings: View {
         case .hires: return "Hi-Res"
         }
     }
-    private var orderName: String {
-        switch repeatMode {
-        case 1: return "列表循环"
-        case 2: return "单曲循环"
-        default: return "顺序播放"
-        }
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             HStack {
@@ -1163,9 +1153,9 @@ struct MXLightSettings: View {
                 Spacer()
                 Text("更多").font(.system(size: 16, weight: .bold))
                 Spacer()
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 20))
-                    .frame(width: 40, height: 42, alignment: .trailing)
+                // Keep the centered title without a decorative, inert action.
+                Color.clear.frame(width: 40, height: 42)
+                    .accessibilityHidden(true)
             }
             .foregroundStyle(MXLight.ink)
             .padding(.horizontal, 24)
@@ -1173,27 +1163,41 @@ struct MXLightSettings: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
-                    sectionLabel("播放体验")
+                    // Repeat mode lives on the player; playlist import lives in Music Library.
+                    // Keep quality here for changing it without an active song.
+                    sectionLabel("播放")
                     card {
                         row("音质选择", icon: "speaker.wave.2", hint: qualityName) {
                             showingLocalQuality = true
-                        }
-                        MXLight.line.frame(height: 0.5)
-                        row("播放顺序", icon: "repeat", hint: orderName) {
-                            repeatMode = (repeatMode + 1) % 3
                         }
                     }
 
                     sectionLabel("音乐数据")
                     card {
-                        row("导入歌单", icon: "square.and.arrow.down",
-                            action: onImportPlaylist)
-                        MXLight.line.frame(height: 0.5)
-                        row("导出音乐收藏", icon: "square.and.arrow.up",
-                            action: onBackup)
-                        MXLight.line.frame(height: 0.5)
-                        row("恢复音乐收藏", icon: "square.and.arrow.down",
-                            action: onRestore)
+                        Menu {
+                            Button("导出收藏与歌单", systemImage: "square.and.arrow.up",
+                                   action: onBackup)
+                            Button("从备份恢复", systemImage: "square.and.arrow.down",
+                                   action: onRestore)
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "externaldrive")
+                                    .font(.system(size: 17))
+                                    .frame(width: 34, height: 34)
+                                    .background(MXLight.cream, in: Circle())
+                                Text("音乐数据备份")
+                                    .font(.system(size: 15, weight: .semibold))
+                                Spacer()
+                                Text("导出 / 恢复")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(MXLight.muted)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 13))
+                            }
+                            .foregroundStyle(MXLight.ink)
+                            .frame(height: 57)
+                            .contentShape(Rectangle())
+                        }
                     }
 
                     sectionLabel("外观")
@@ -1207,8 +1211,8 @@ struct MXLightSettings: View {
                                 .font(.system(size: 15, weight: .semibold))
                             Spacer()
                             Picker("外观主题", selection: $appearance) {
-                                Text("经典深色版").tag("classic")
-                                Text("暖色浅色版").tag("light")
+                                Text("经典版").tag("classic")
+                                Text("浅色版").tag("light")
                             }
                             .tint(MXLight.teal)
                             .labelsHidden()
