@@ -339,7 +339,7 @@ struct MXLightDetail: View {
                             Text(title).font(.system(size: 24, weight: .bold))
                                 .foregroundStyle(MXLight.ink)
                                 .lineLimit(2)
-                            Text("\(tracks.count) 首歌曲")
+                            Text(isPlaylistGrid ? "\(playlists.count) 个歌单" : "\(tracks.count) 首歌曲")
                                 .font(.system(size: 12)).foregroundStyle(MXLight.muted)
                             if let first = tracks.first {
                                 Button { onPlay(first, tracks) } label: {
