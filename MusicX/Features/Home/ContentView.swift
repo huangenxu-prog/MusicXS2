@@ -392,7 +392,7 @@ struct ContentView: View {
                 Text("音源管理需要验证暗号")
             }
             .sheet(isPresented: $isLightLXSourcePresented) {
-                LXSourceTestPanel().preferredColorScheme(.dark)
+                MXReferenceSources().preferredColorScheme(.light)
             }
             .task { await loadHomeSongs() }
             .task { await loadOfficialCollections() }
