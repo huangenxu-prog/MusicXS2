@@ -297,6 +297,7 @@ struct ContentView: View {
 
     var body: some View {
         finalAppView
+            .preferredColorScheme(appearanceMode == "light" ? .light : .dark)
     }
 
     private var finalAppView: some View {
@@ -512,10 +513,35 @@ struct ContentView: View {
                     MXLightDetail(
                         route: route,
                         favorites: favoriteSongs.compactMap(\.onlineSong),
-                        onBack: { discoveryRoute = nil },
+                        onBack: {
+                            withAnimation(.easeInOut(duration: 0.28)) {
+                                discoveryRoute = nil
+                            }
+                        },
                         onPlay: { song, tracks in playCollectionTrack(song, in: tracks) },
-                        onOpen: { nextRoute in discoveryRoute = nextRoute }
+                        onOpen: { nextRoute in
+                            withAnimation(.easeInOut(duration: 0.28)) {
+                                discoveryRoute = nextRoute
+                            }
+                        },
+                        isFavorite: { track in favorites.contains(stableSongID(track)) },
+                        onFavorite: { track in toggleFavorite(appSong(from: track)) }
                     )
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        if let now = currentSong {
+                            MXLightMiniPlayer(
+                                now: lightSong(now),
+                                isPlaying: playerStore.isPlaying,
+                                isResolving: isResolvingSong || playerStore.isBuffering,
+                                onPlayer: { isPlayerPresented = true },
+                                onPlayPause: { toggleCurrentPlayback() },
+                                onNext: { stepSong(by: 1) }
+                            )
+                            .padding(.top, 7)
+                            .padding(.bottom, 9)
+                            .background(MXLight.background.opacity(0.97))
+                        }
+                    }
                 } else {
                     MusicDiscoveryPage(
                 route: route,
@@ -657,6 +683,10 @@ struct ContentView: View {
                 onAllCollections: { discoveryRoute = .featuredPlaylists },
                 onScene: openLightScene,
                 onSong: playLightHomeSong,
+                isFavorite: { id in favorites.contains(id) },
+                onFavorite: { id in
+                    if let track = songs.first(where: { $0.id == id }) { toggleFavorite(track) }
+                },
                 onCollection: openLightPlaylist,
                 onAlbum: { name, artist in discoveryRoute = .album(title: name, artist: artist) },
                 onArtist: { openLightScene($0) },
@@ -668,6 +698,12 @@ struct ContentView: View {
                 onSong: { id in
                     if let found = filteredSongs.first(where: { $0.id == id }) {
                         playSearchResult(found)
+                    }
+                },
+                isFavorite: { id in favorites.contains(id) },
+                onFavorite: { id in
+                    if let found = filteredSongs.first(where: { $0.id == id }) {
+                        toggleFavorite(found)
                     }
                 })
             .task(id: searchText) {
@@ -2556,12 +2592,16 @@ struct ContentView: View {
     }
 
     private func playNextAfterNaturalFinish() {
-        guard !playbackQueue.isEmpty, let currentSong else { return }
+        guard let currentSong else { return }
+        // Repeat-one must work even for a standalone song with an empty queue.
         if repeatMode == 2 {
-            playerStore.replayCurrentTrack()
+            if !playerStore.replayCurrentTrack() {
+                retryCurrentSongWithFreshURL()
+            }
             return
         }
         let queue = playbackQueue
+        guard !queue.isEmpty else { return }
         guard let index = queue.firstIndex(where: { $0.id == currentSong.id }) else { return }
         if isShuffleEnabled && queue.count > 1 {
             selectRandomNextTrack(from: queue)
