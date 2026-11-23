@@ -126,7 +126,8 @@ private struct MusicXPageBackground: View {
 struct ContentView: View {
     @State private var selectedTab: MainTab = .home
     @AppStorage("musicx.appearance") private var appearanceMode = "classic"
-    @State private var lightLibrarySegment = "recent"
+    @State private var lightLibrarySegment = "playlists"
+    @State private var lightSearchPlaylistResults: [MusicPlaylist] = []
     @State private var isLightSettingsPresented = false
     @State private var isLightPlaylistImportPresented = false
     @State private var lightPlaylistLink = ""
@@ -645,11 +646,14 @@ struct ContentView: View {
     // Warm-light views are fed by the SAME store and song queue as classic mode.
     private func lightSong(_ track: AppSong) -> MXLightTrack {
         MXLightTrack(id: track.id, title: track.title, artist: track.artist,
-                     album: track.album, artworkURL: track.onlineSong?.artworkURL)
+                     album: track.album, artworkURL: track.onlineSong?.artworkURL,
+                     duration: track.onlineSong?.duration,
+                     source: track.onlineSong?.source)
     }
 
     private func lightPlaylist(_ item: MusicPlaylist) -> MXLightCollection {
-        MXLightCollection(id: item.id, name: item.name, count: item.trackCount, artworkURL: item.artworkURL)
+        MXLightCollection(id: item.id, name: item.name, count: item.trackCount,
+                          artworkURL: item.artworkURL, source: item.source)
     }
 
     private var lightImportedPlaylists: [ImportedPlaylistSnapshot] {
@@ -706,6 +710,7 @@ struct ContentView: View {
         case .search:
             MXLightSearch(
                 searchText: $searchText, songs: filteredSongs.map(lightSong),
+                playlists: lightSearchPlaylistResults.map(lightPlaylist),
                 isLoading: isSearching, onScene: openLightScene,
                 onSong: { id in
                     if let found = filteredSongs.first(where: { $0.id == id }) {
@@ -717,15 +722,30 @@ struct ContentView: View {
                     if let found = filteredSongs.first(where: { $0.id == id }) {
                         toggleFavorite(found)
                     }
+                },
+                onAlbum: { title, artist in discoveryRoute = .album(title: title, artist: artist) },
+                onArtist: openLightArtist,
+                onPlaylist: { id in
+                    if let playlist = lightSearchPlaylistResults.first(where: { $0.id == id }) {
+                        discoveryRoute = .playlistByID(playlist)
+                    }
                 })
             .task(id: searchText) {
                 let keyword = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
                 if keyword.isEmpty {
                     onlineResults = []
+                    lightSearchPlaylistResults = []
                     searchError = nil
                 } else {
                     try? await Task.sleep(for: .milliseconds(450))
-                    if !Task.isCancelled { await searchOnline(keyword) }
+                    guard !Task.isCancelled else { return }
+                    async let playlistSearch = MusicCatalogSearchEngine().searchPlaylists(
+                        keyword: keyword, count: 10)
+                    await searchOnline(keyword)
+                    let playlists = (try? await playlistSearch) ?? []
+                    guard !Task.isCancelled,
+                          searchText.trimmingCharacters(in: .whitespacesAndNewlines) == keyword else { return }
+                    lightSearchPlaylistResults = playlists
                 }
             }
         case .library:
@@ -741,6 +761,7 @@ struct ContentView: View {
                 },
                 onPlaylist: openLightPlaylist,
                 onImport: { isLightPlaylistImportPresented = true },
+                onSearch: { selectedTab = .search },
                 onSettings: { isLightSettingsPresented = true })
         }
     }
