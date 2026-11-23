@@ -512,7 +512,7 @@ struct ContentView: View {
         if let route = discoveryRoute {
             Group {
                 if appearanceMode == "light" {
-                    MXLightDetail(
+                    MXReferenceDetail(
                         route: route,
                         favorites: favoriteSongs.compactMap(\.onlineSong),
                         onBack: popLightRoute,
@@ -669,6 +669,21 @@ struct ContentView: View {
         }
     }
 
+    private func openLightArtist(_ name: String) {
+        discoveryRoute = .musicCategory(title: name, subtitle: "歌手",
+                                         artwork: "", keyword: name)
+    }
+
+    private func moveLightQueue(_ indices: IndexSet, _ destination: Int) {
+        // The visual queue excludes the playing track; keep that item active.
+        var next = playbackQueue.filter { $0.id != currentSong?.id }
+        guard !next.isEmpty else { return }
+        next.move(fromOffsets: indices, toOffset: destination)
+        playbackQueueSongs = (currentSong.map { [$0] } ?? []) + next
+        hasCustomPlaybackQueue = true
+        resetShuffleHistory()
+    }
+
     private func openLightScene(_ keyword: String) {
         discoveryRoute = .musicCategory(title: keyword, subtitle: "音乐分类",
                                          artwork: "", keyword: keyword)
@@ -705,7 +720,7 @@ struct ContentView: View {
                 },
                 onCollection: openLightPlaylist,
                 onAlbum: { name, artist in discoveryRoute = .album(title: name, artist: artist) },
-                onArtist: { openLightScene($0) },
+                onArtist: openLightArtist,
                 onSettings: { isLightSettingsPresented = true })
         case .search:
             MXLightSearch(
@@ -784,7 +799,7 @@ struct ContentView: View {
     }
 
     private var lightNowPlaying: some View {
-        MXLightPlayer(
+        MXReferencePlayer(
             song: currentSong.map(lightSong), queue: playbackQueue.map(lightSong),
             lyrics: lyricLines.map(\.text), activeLyricIndex: activeLyricIndex,
             isPlaying: playerStore.isPlaying,
@@ -822,7 +837,9 @@ struct ContentView: View {
             onRemoveQueue: { id in
                 if let song = playbackQueue.first(where: { $0.id == id }) { removeFromQueue(song) }
             },
-            onClearQueue: clearQueue
+            onClearQueue: clearQueue,
+            onMoveQueue: moveLightQueue,
+            onQuality: { isSettingsAlertPresented = true }
         )
     }
 
