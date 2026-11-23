@@ -8,6 +8,7 @@ struct MXReferencePlayer: View {
     let queue: [MXLightTrack]
     let lyrics: [String]
     let activeLyricIndex: Int
+    let lyricsUnavailable: Bool
     let isPlaying: Bool
     let isLoading: Bool
     let currentTime: Double
@@ -252,9 +253,15 @@ struct MXReferencePlayer: View {
                 ScrollView(showsIndicators: false) {
                     LazyVStack(alignment: .leading, spacing: 25) {
                         if lyrics.isEmpty {
-                            Text("暂时没有找到歌词")
-                                .font(.system(size: 17))
-                                .foregroundStyle(MXLight.muted)
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text(lyricsUnavailable ? "暂时没有找到歌词" : "正在获取歌词…")
+                                    .font(.system(size: 17, weight: .medium))
+                                    .foregroundStyle(MXLight.muted)
+                                if !lyricsUnavailable {
+                                    ProgressView().tint(MXLight.teal)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         } else {
                             ForEach(Array(lyrics.enumerated()), id: \.offset) { index, line in
                                 Text(line)
