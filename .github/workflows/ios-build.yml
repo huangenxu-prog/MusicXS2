@@ -36,6 +36,14 @@ jobs:
             tests/main.swift -o /tmp/test-library-queue
           /tmp/test-library-queue
 
+      - name: Test LX source restore and crash recovery
+        run: |
+          swiftc -parse-as-library \
+            MusicX/ResourceEngine/LXCompatibility/LXSourceLibrary.swift \
+            tests/source-archive.swift \
+            -o /tmp/test-source-archive
+          /tmp/test-source-archive
+
       - name: Install XcodeGen
         run: brew install xcodegen
 
