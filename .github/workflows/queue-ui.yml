@@ -1,20 +1,44 @@
 name: Library queue UI reproduction
 on:
   push:
-    branches: [diagnostics/library-queue-ui]
+    branches:
+      - diagnostics/library-queue-ui
+      - feature/light-design-fidelity-20261123
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: musicx-queue-ui-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
-      - run: brew install xcodegen && xcodegen generate
-      - name: Exercise both installed-app library lists
+      - name: Prepare resources and generate Xcode project
         run: |
-          id=$(xcrun simctl list devices available -j | python3 -c 'import json,sys;print(next(d["udid"] for k,ds in json.load(sys.stdin)["devices"].items() if ".iOS-" in k for d in ds if d["name"].startswith("iPhone")))')
-          xcodebuild test -scheme MusicX -destination "platform=iOS Simulator,id=$id" -parallel-testing-enabled NO -resultBundlePath QueueTests.xcresult CODE_SIGNING_ALLOWED=NO
+          brew install xcodegen
+          ASSET_CATALOG="$(find . -type d -name Assets.xcassets -print -quit)"
+          test -n "$ASSET_CATALOG"
+          unzip -oq "$ASSET_CATALOG/MusicX-SearchCategory-Assets.zip" -d "$ASSET_CATALOG"
+          rm "$ASSET_CATALOG/MusicX-SearchCategory-Assets.zip"
+          swift scripts/render-app-icon.swift
+          xcodegen generate
+      - name: Exercise favorites and recent-play queues on iPhone simulator
+        run: |
+          id=$(xcrun simctl list devices available -j | python3 -c 'import json,sys;print(next(d["udid"] for k,ds in json.load(sys.stdin)["devices"].items() if ".iOS-" in k for d in ds if d["name"].startswith("iPhone"))')
+          xcodebuild test -project MusicX.xcodeproj -scheme MusicX \
+            -destination "platform=iOS Simulator,id=$id" \
+            -parallel-testing-enabled NO \
+            -resultBundlePath QueueTests.xcresult \
+            CODE_SIGNING_ALLOWED=NO
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: QueueTests
           path: QueueTests.xcresult
+          retention-days: 7
