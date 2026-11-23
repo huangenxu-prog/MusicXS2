@@ -596,14 +596,18 @@ struct MXLightChrome: View {
             .padding(7)
             .frame(height: 64)
             .background {
-                if #available(iOS 26.0, *) {
-                    Capsule().fill(.ultraThinMaterial)
-                        .glassEffect(.regular, in: .capsule)
-                } else {
-                    Capsule().fill(.ultraThinMaterial)
-                }
+                Capsule()
+                    .fill(.ultraThinMaterial)
+                    .overlay {
+                        Capsule().stroke(
+                            LinearGradient(
+                                colors: [.white.opacity(0.98), .white.opacity(0.25)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            ), lineWidth: 1.2
+                        )
+                    }
             }
-            .overlay(Capsule().stroke(.white.opacity(0.72), lineWidth: 1))
+            .overlay(Capsule().stroke(MXLight.teal.opacity(0.13), lineWidth: 0.7))
             .shadow(color: MXLight.teal.opacity(0.14), radius: 12, y: 4)
             .padding(.horizontal, 20)
         }
