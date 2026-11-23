@@ -309,77 +309,13 @@ struct ContentView: View {
     }
 
     private var finalAppView: some View {
-        presentationView
-            .fileExporter(isPresented: $isBackupExportPresented,
-                          document: backupDocument,
-                          contentType: .json,
-                          defaultFilename: "MusicXS2-Backup") { result in
-                if case .failure(let error) = result {
-                    backupNotice = "导出失败：\(error.localizedDescription)"
-                    isBackupNoticePresented = true
-                }
-            }
-            .fileImporter(isPresented: $isBackupImportPresented,
-                          allowedContentTypes: [.json],
-                          allowsMultipleSelection: false) { result in
-                switch result {
-                case .success(let urls):
-                    guard let url = urls.first else { return }
-                    let accessible = url.startAccessingSecurityScopedResource()
-                    defer { if accessible { url.stopAccessingSecurityScopedResource() } }
-                    do {
-                        try restoreMusicBackup(Data(contentsOf: url))
-                    } catch {
-                        backupNotice = "恢复失败：\(error.localizedDescription)"
-                        isBackupNoticePresented = true
-                    }
-                case .failure(let error):
-                    backupNotice = "文件选择失败：\(error.localizedDescription)"
-                    isBackupNoticePresented = true
-                }
-            }
-            .alert("音乐数据备份", isPresented: $isBackupNoticePresented) {
-                Button("知道了", role: .cancel) {}
-            } message: {
-                Text(backupNotice)
-            }
-            .onChange(of: discoveryRoute?.id) { oldValue, newValue in
-                if oldValue == nil && newValue != nil { isDiscoveryPopping = false }
-            }
-            .onAppear {
-                restorePlaybackSession()
-                playerStore.setRepeatOneEnabled(repeatMode == 2)
-                scheduleSleepTimer()
-            }
-            // Shared metadata task: both the classic and the light player read
-            // lyricLines from here. Previously only the classic player loaded them.
-            .task(id: currentSong?.onlineSong?.id) {
-                await loadPlayerMetadata()
-            }
-            .onChange(of: repeatMode) { _, newValue in
-                playerStore.setRepeatOneEnabled(newValue == 2)
-            }
-            .onChange(of: scenePhase) { _, phase in
-                if phase != .active {
-                    savePlaybackSession()
-                } else {
-                    scheduleSleepTimer()
-                }
-            }
-            .onChange(of: sleepTimerDeadline) { _, _ in
-                scheduleSleepTimer()
-            }
-            .onChange(of: playerStore.currentTime) { _, time in
-                guard time.isFinite else { return }
-                let second = Int(time)
-                if second / 5 != lastSavedPlaybackSecond / 5 {
-                    savePlaybackSession()
-                    lastSavedPlaybackSecond = second
-                }
-            }
-            .onChange(of: playerStore.isPlaying) { _, _ in savePlaybackSession() }
-            .onChange(of: playbackQueueSongs.map(\.id)) { _, _ in savePlaybackSession() }
-            
+        lightPresentedView
+            .task { await loadHomeSongs() }
+            .task { await loadOfficialCollections() }
+    }
+
+    private var lightPresentedView: some View {
+        lifecycleView
             .sheet(isPresented: $isLightSettingsPresented) {
                 MXLightSettings(
                     appearance: $appearanceMode,
@@ -419,8 +355,84 @@ struct ContentView: View {
                 MXReferenceSources(onPreviewStart: { playerStore.pause() })
                     .preferredColorScheme(.light)
             }
-            .task { await loadHomeSongs() }
-            .task { await loadOfficialCollections() }
+    }
+
+    private var lifecycleView: some View {
+        backupPresentedView
+            .onChange(of: discoveryRoute?.id) { oldValue, newValue in
+                if oldValue == nil && newValue != nil { isDiscoveryPopping = false }
+            }
+            .onAppear {
+                restorePlaybackSession()
+                playerStore.setRepeatOneEnabled(repeatMode == 2)
+                scheduleSleepTimer()
+            }
+            // Shared metadata task: both the classic and the light player read
+            // lyricLines from here. Previously only the classic player loaded them.
+            .task(id: currentSong?.onlineSong?.id) {
+                await loadPlayerMetadata()
+            }
+            .onChange(of: repeatMode) { _, newValue in
+                playerStore.setRepeatOneEnabled(newValue == 2)
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active {
+                    savePlaybackSession()
+                } else {
+                    scheduleSleepTimer()
+                }
+            }
+            .onChange(of: sleepTimerDeadline) { _, _ in
+                scheduleSleepTimer()
+            }
+            .onChange(of: playerStore.currentTime) { _, time in
+                guard time.isFinite else { return }
+                let second = Int(time)
+                if second / 5 != lastSavedPlaybackSecond / 5 {
+                    savePlaybackSession()
+                    lastSavedPlaybackSecond = second
+                }
+            }
+            .onChange(of: playerStore.isPlaying) { _, _ in savePlaybackSession() }
+            .onChange(of: playbackQueueSongs.map(\.id)) { _, _ in savePlaybackSession() }
+    }
+
+    private var backupPresentedView: some View {
+        presentationView
+            
+            .fileExporter(isPresented: $isBackupExportPresented,
+                          document: backupDocument,
+                          contentType: .json,
+                          defaultFilename: "MusicXS2-Backup") { result in
+                if case .failure(let error) = result {
+                    backupNotice = "导出失败：\(error.localizedDescription)"
+                    isBackupNoticePresented = true
+                }
+            }
+            .fileImporter(isPresented: $isBackupImportPresented,
+                          allowedContentTypes: [.json],
+                          allowsMultipleSelection: false) { result in
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first else { return }
+                    let accessible = url.startAccessingSecurityScopedResource()
+                    defer { if accessible { url.stopAccessingSecurityScopedResource() } }
+                    do {
+                        try restoreMusicBackup(Data(contentsOf: url))
+                    } catch {
+                        backupNotice = "恢复失败：\(error.localizedDescription)"
+                        isBackupNoticePresented = true
+                    }
+                case .failure(let error):
+                    backupNotice = "文件选择失败：\(error.localizedDescription)"
+                    isBackupNoticePresented = true
+                }
+            }
+            .alert("音乐数据备份", isPresented: $isBackupNoticePresented) {
+                Button("知道了", role: .cancel) {}
+            } message: {
+                Text(backupNotice)
+            }
     }
 
     private var presentationView: some View {
