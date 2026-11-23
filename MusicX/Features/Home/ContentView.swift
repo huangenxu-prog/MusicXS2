@@ -721,6 +721,28 @@ struct ContentView: View {
         playLibrarySong(in: displayed, at: index)
     }
 
+    private func lightSearchSong(_ id: Int) -> AppSong? {
+        filteredSongs.first(where: { $0.id == id })
+            ?? (searchResultsBySource[.qq] ?? []).first(where: { $0.id == id })
+            ?? (searchResultsBySource[.netease] ?? []).first(where: { $0.id == id })
+    }
+
+    private func playLightSearchResult(_ id: Int, from selectedSource: String) {
+        let queue: [AppSong]
+        switch selectedSource {
+        case "QQ 音乐": queue = searchResultsBySource[.qq] ?? []
+        case "网易云": queue = searchResultsBySource[.netease] ?? []
+        default: queue = filteredSongs
+        }
+        guard let found = queue.first(where: { $0.id == id })
+                ?? lightSearchSong(id) else { return }
+        playbackQueueSongs = queue.contains(where: { $0.id == found.id })
+            ? queue : [found] + queue
+        hasCustomPlaybackQueue = true
+        resetShuffleHistory()
+        select(found)
+    }
+
     @ViewBuilder private var lightRootPage: some View {
         switch selectedTab {
         case .home:
@@ -752,14 +774,12 @@ struct ContentView: View {
                 playlists: lightSearchPlaylistResults.map(lightPlaylist),
                 currentTrackID: currentSong?.id, isPlaying: playerStore.isPlaying,
                 isLoading: isSearching, onScene: openLightScene,
-                onSong: { id in
-                    if let found = filteredSongs.first(where: { $0.id == id }) {
-                        playSearchResult(found)
-                    }
+                onSong: { id, sourceName in
+                    playLightSearchResult(id, from: sourceName)
                 },
                 isFavorite: { id in favorites.contains(id) },
                 onFavorite: { id in
-                    if let found = filteredSongs.first(where: { $0.id == id }) {
+                    if let found = lightSearchSong(id) {
                         toggleFavorite(found)
                     }
                 },
