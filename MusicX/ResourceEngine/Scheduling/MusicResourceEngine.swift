@@ -229,8 +229,7 @@ private struct ImportedLXSourceProvider: MusicResourceProvider {
                             detail: "qualities=\((metadata["qualitys"] as? [String] ?? []).joined(separator: ","))"
                         )
                         let qualities = metadata["qualitys"] as? [String] ?? []
-                        let requested = qualities.contains("320k") ? "320k"
-                            : (qualities.contains("128k") ? "128k" : (qualities.first ?? "320k"))
+                        let requested = quality.lxQuality(supported: qualities)
                         let info: [String: Any] = [
                             "songmid": song.sourceID,
                             "id": song.sourceID,
