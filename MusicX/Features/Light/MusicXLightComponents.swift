@@ -854,7 +854,6 @@ struct MXLightLibrary: View {
     let onFavorite: (Int) -> Void
     let onPlaylist: (String) -> Void
     let onImport: () -> Void
-    let onSearch: () -> Void
     let onSettings: () -> Void
 
     var body: some View {
@@ -870,10 +869,6 @@ struct MXLightLibrary: View {
                             .foregroundStyle(MXLight.muted)
                     }
                     Spacer()
-                    Button(action: onSearch) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 22)).frame(width: 40, height: 40)
-                    }
                     Button(action: onSettings) {
                         Image(systemName: "ellipsis")
                             .font(.system(size: 22)).frame(width: 40, height: 40)
