@@ -129,6 +129,7 @@ struct ContentView: View {
     @State private var lightLibrarySegment = "playlists"
     @State private var lightSearchPlaylistResults: [MusicPlaylist] = []
     @State private var isLightSettingsPresented = false
+    @State private var isLightQualityPickerPresented = false
     @State private var isLightPlaylistImportPresented = false
     @State private var lightPlaylistLink = ""
     @State private var lightPlaylistMessage: String?
@@ -369,7 +370,7 @@ struct ContentView: View {
             .sheet(isPresented: $isLightSettingsPresented) {
                 MXLightSettings(
                     appearance: $appearanceMode,
-                    onQuality: { isLightSettingsPresented = false; isSettingsAlertPresented = true },
+                    onQuality: { isLightSettingsPresented = false; isLightQualityPickerPresented = true },
                     onSources: { isLightSettingsPresented = false; isLightSourceAuthPresented = true },
                     onBackup: { isLightSettingsPresented = false; exportMusicBackup() },
                     onRestore: { isLightSettingsPresented = false; isBackupImportPresented = true },
@@ -380,6 +381,11 @@ struct ContentView: View {
             }
             .sheet(isPresented: $isLightPlaylistImportPresented) {
                 lightPlaylistImportSheet
+            }
+            .sheet(isPresented: $isLightQualityPickerPresented) {
+                MXLightQualityPicker(selectedQualityRaw: $playbackQualityRaw)
+                    .presentationDetents([.height(405)])
+                    .presentationDragIndicator(.hidden)
             }
             .alert("音源管理", isPresented: $isLightSourceAuthPresented) {
                 SecureField("输入暗号", text: $sourceAccessPhrase)
@@ -528,7 +534,9 @@ struct ContentView: View {
                         onPlay: { song, tracks in playCollectionTrack(song, in: tracks) },
                         onOpen: pushLightRoute,
                         isFavorite: { track in favorites.contains(stableSongID(track)) },
-                        onFavorite: { track in toggleFavorite(appSong(from: track)) }
+                        onFavorite: { track in toggleFavorite(appSong(from: track)) },
+                        currentTrackID: currentSong?.id,
+                        isPlaying: playerStore.isPlaying
                     )
                     .safeAreaInset(edge: .bottom, spacing: 0) {
                         if let now = currentSong {
@@ -716,6 +724,7 @@ struct ContentView: View {
         case .home:
             MXLightHome(
                 songs: songs.map(lightSong), collections: homeOfficialCollections.map(lightPlaylist),
+                currentTrackID: currentSong?.id, isPlaying: playerStore.isPlaying,
                 onDaily: { discoveryRoute = .daily },
                 onFavorites: { discoveryRoute = .featuredPick },
                 onCharts: { discoveryRoute = .charts },
@@ -735,6 +744,7 @@ struct ContentView: View {
             MXLightSearch(
                 searchText: $searchText, songs: filteredSongs.map(lightSong),
                 playlists: lightSearchPlaylistResults.map(lightPlaylist),
+                currentTrackID: currentSong?.id, isPlaying: playerStore.isPlaying,
                 isLoading: isSearching, onScene: openLightScene,
                 onSong: { id in
                     if let found = filteredSongs.first(where: { $0.id == id }) {
@@ -777,6 +787,7 @@ struct ContentView: View {
                 segment: $lightLibrarySegment, recent: recentSongs.map(lightSong),
                 favorites: favoriteSongs.map(lightSong),
                 playlists: lightImportedPlaylists.map { lightPlaylist($0.displayPlaylist) },
+                currentTrackID: currentSong?.id, isPlaying: playerStore.isPlaying,
                 onSong: playLightLibrarySong,
                 onFavorite: { id in
                     if let song = (favoriteSongs + recentSongs).first(where: { $0.id == id }) {
@@ -849,7 +860,7 @@ struct ContentView: View {
             },
             onClearQueue: clearQueue,
             onMoveQueue: moveLightQueue,
-            onQuality: { isSettingsAlertPresented = true }
+            onQuality: { isLightQualityPickerPresented = true }
         )
     }
 
