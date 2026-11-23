@@ -2,6 +2,8 @@ import SwiftUI
 
 @main
 struct MusicXApp: App {
+    @AppStorage("musicx.appearance") private var appearance = "classic"
+
     #if DEBUG && targetEnvironment(simulator)
     init() {
         let env = ProcessInfo.processInfo.environment
@@ -16,7 +18,7 @@ struct MusicXApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(appearance == "light" ? .light : .dark)
         }
     }
 }
