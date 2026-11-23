@@ -947,31 +947,152 @@ struct MXLightSettings: View {
     let onSources: () -> Void
     let onBackup: () -> Void
     let onRestore: () -> Void
+    let onImportPlaylist: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("musicx.repeatMode") private var repeatMode = 0
+    @AppStorage("musicx.playbackQuality") private var qualityRaw = MusicQuality.high.rawValue
+
+    private var qualityName: String {
+        switch MusicQuality(rawValue: qualityRaw) ?? .high {
+        case .standard: return "标准 128 kbps"
+        case .high: return "高音质 320 kbps"
+        case .lossless: return "无损"
+        case .hires: return "Hi-Res"
+        }
+    }
+    private var orderName: String {
+        switch repeatMode {
+        case 1: return "列表循环"
+        case 2: return "单曲循环"
+        default: return "顺序播放"
+        }
+    }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section("外观主题") {
-                    Picker("外观主题", selection: $appearance) {
-                        Text("经典深色版").tag("classic")
-                        Text("暖色浅色版").tag("light")
-                    }
-                    .pickerStyle(.inline)
+        VStack(spacing: 0) {
+            HStack {
+                Button { dismiss() } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 19)).frame(width: 40, height: 42, alignment: .leading)
                 }
-                Section("播放") {
-                    Button("音质设置", action: onQuality)
-                }
-                Section("音乐数据") {
-                    Button("备份音乐收藏", action: onBackup)
-                    Button("恢复音乐收藏", action: onRestore)
-                }
-                Section("高级功能") {
-                    Button("音源管理", action: onSources)
-                }
+                Spacer()
+                Text("更多").font(.system(size: 16, weight: .bold))
+                Spacer()
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 20))
+                    .frame(width: 40, height: 42, alignment: .trailing)
             }
-            .navigationTitle("设置")
-            .navigationBarTitleDisplayMode(.inline)
+            .foregroundStyle(MXLight.ink)
+            .padding(.horizontal, 24)
+            .padding(.top, 6)
+
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    sectionLabel("播放体验")
+                    card {
+                        row("音质选择", icon: "speaker.wave.2", hint: qualityName,
+                            action: onQuality)
+                        MXLight.line.frame(height: 0.5)
+                        row("播放顺序", icon: "repeat", hint: orderName) {
+                            repeatMode = (repeatMode + 1) % 3
+                        }
+                    }
+
+                    sectionLabel("音乐数据")
+                    card {
+                        row("导入歌单", icon: "square.and.arrow.down",
+                            action: onImportPlaylist)
+                        MXLight.line.frame(height: 0.5)
+                        row("导出音乐收藏", icon: "square.and.arrow.up",
+                            action: onBackup)
+                        MXLight.line.frame(height: 0.5)
+                        row("恢复音乐收藏", icon: "square.and.arrow.down",
+                            action: onRestore)
+                    }
+
+                    sectionLabel("外观")
+                    card {
+                        HStack(spacing: 12) {
+                            Image(systemName: "paintbrush")
+                                .font(.system(size: 17))
+                                .frame(width: 34, height: 34)
+                                .background(MXLight.cream, in: Circle())
+                            Text("外观主题")
+                                .font(.system(size: 15, weight: .semibold))
+                            Spacer()
+                            Picker("外观主题", selection: $appearance) {
+                                Text("经典深色版").tag("classic")
+                                Text("暖色浅色版").tag("light")
+                            }
+                            .tint(MXLight.teal)
+                            .labelsHidden()
+                        }
+                        .foregroundStyle(MXLight.ink)
+                        .frame(height: 57)
+                    }
+
+                    sectionLabel("高级功能")
+                    card {
+                        row("音源管理", icon: "lock",
+                            hint: "需要暗号", action: onSources)
+                    }
+
+                    Text("MusicX · 无需账号 · 专注听歌")
+                        .font(.system(size: 12))
+                        .foregroundStyle(MXLight.muted)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 32)
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 20)
+                .padding(.bottom, 30)
+            }
         }
+        .background(MXLight.background.ignoresSafeArea())
         .preferredColorScheme(.light)
+    }
+
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 12, weight: .medium))
+            .tracking(1.8)
+            .foregroundStyle(MXLight.muted)
+            .padding(.top, 25)
+            .padding(.bottom, 11)
+    }
+
+    private func card<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(spacing: 0, content: content)
+            .padding(.horizontal, 15)
+            .background(MXLight.paper, in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    private func row(_ title: String, icon: String, hint: String? = nil,
+                     action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 17))
+                    .foregroundStyle(MXLight.ink)
+                    .frame(width: 34, height: 34)
+                    .background(MXLight.cream, in: Circle())
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(MXLight.ink)
+                Spacer(minLength: 6)
+                if let hint {
+                    Text(hint)
+                        .font(.system(size: 12))
+                        .foregroundStyle(MXLight.muted)
+                        .lineLimit(1)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13))
+                    .foregroundStyle(MXLight.ink)
+            }
+            .frame(height: 57)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
