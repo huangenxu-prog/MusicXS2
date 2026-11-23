@@ -9,6 +9,8 @@ struct MXReferenceDetail: View {
     let onOpen: (MusicDiscoveryRoute) -> Void
     let isFavorite: (MusicSong) -> Bool
     let onFavorite: (MusicSong) -> Void
+    let currentTrackID: Int?
+    let isPlaying: Bool
 
     @State private var tracks: [MusicSong] = []
     @State private var playlists: [MusicPlaylist] = []
@@ -399,7 +401,9 @@ struct MXReferenceDetail: View {
                         index: index,
                         onPlay: { onPlay(song, tracks) },
                         onFavorite: { onFavorite(song) },
-                        favorite: isFavorite(song)
+                        favorite: isFavorite(song),
+                        isCurrent: stableID(song) == currentTrackID,
+                        isPlaying: isPlaying
                     )
                 }
             }
