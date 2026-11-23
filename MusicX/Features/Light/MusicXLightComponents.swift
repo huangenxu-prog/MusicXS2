@@ -388,10 +388,7 @@ struct MXLightHome: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 16) {
                             ForEach(Array(artists.prefix(9).enumerated()), id: \.element.id) { i, track in
-                                Button {
-                                saveHistory(searchText)
-                                onArtist(track.artist)
-                            } label: {
+                                Button { onArtist(track.artist) } label: {
                                     VStack(spacing: 8) {
                                         MXLightArtwork(url: track.artworkURL, size: 73, variant: i)
                                             .clipShape(Circle())
