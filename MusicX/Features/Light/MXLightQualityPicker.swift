@@ -40,7 +40,7 @@ struct MXLightQualityPicker: View {
             .padding(.bottom, 15)
 
             VStack(spacing: 0) {
-                ForEach(Array(options.enumerated()), id: \.element.0.id) { index, option in
+                ForEach(Array(options.enumerated()), id: \.offset) { index, option in
                     let isSelected = selectedQualityRaw == option.0.rawValue
                     Button {
                         selectedQualityRaw = option.0.rawValue
