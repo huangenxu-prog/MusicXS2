@@ -344,6 +344,11 @@ struct ContentView: View {
                 restorePlaybackSession()
                 playerStore.setRepeatOneEnabled(repeatMode == 2)
             }
+            // Shared metadata task: both the classic and the light player read
+            // lyricLines from here. Previously only the classic player loaded them.
+            .task(id: currentSong?.onlineSong?.id) {
+                await loadPlayerMetadata()
+            }
             .onChange(of: repeatMode) { _, newValue in
                 playerStore.setRepeatOneEnabled(newValue == 2)
             }
@@ -806,6 +811,7 @@ struct ContentView: View {
         MXReferencePlayer(
             song: currentSong.map(lightSong), queue: playbackQueue.map(lightSong),
             lyrics: lyricLines.map(\.text), activeLyricIndex: activeLyricIndex,
+            lyricsUnavailable: lyricsUnavailable,
             isPlaying: playerStore.isPlaying,
             isLoading: isResolvingSong || playerStore.isBuffering,
             currentTime: playerStore.currentTime, duration: playerStore.duration,
@@ -2259,7 +2265,6 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(.dark)
-        .task(id: currentSong?.id) { await loadPlayerMetadata() }
     }
 
     private var activeLyricIndex: Int {
@@ -2281,14 +2286,17 @@ struct ContentView: View {
         let service = GDStudioMetadataService()
         async let artwork = try? service.artworkURL(for: song)
         async let lyrics = try? service.lyrics(for: song)
-        let artworkResult = await artwork
+        // Publish lyrics as soon as their own request finishes: a slower artwork
+        // endpoint must not keep an already-fetched lyric page empty.
         let lyricsResult = await lyrics
         guard !Task.isCancelled, currentSong?.onlineSong?.id == song.id else { return }
-        if let artworkResult { resolvedArtworkURL = artworkResult }
         if let lyricsResult {
             lyricLines = parseLyrics(lyricsResult.original)
         }
         lyricsUnavailable = lyricLines.isEmpty
+        let artworkResult = await artwork
+        guard !Task.isCancelled, currentSong?.onlineSong?.id == song.id else { return }
+        if let artworkResult { resolvedArtworkURL = artworkResult }
     }
 
     private func parseLyrics(_ raw: String) -> [PlayerLyricLine] {
