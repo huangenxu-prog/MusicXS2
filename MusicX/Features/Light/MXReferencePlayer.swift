@@ -30,6 +30,7 @@ struct MXReferencePlayer: View {
     let onClearQueue: () -> Void
     let onMoveQueue: (IndexSet, Int) -> Void
     let onQuality: () -> Void
+    let onSleepTimer: () -> Void
 
     @State private var isScrubbing = false
     @State private var scrubPosition: Double = 0
@@ -172,12 +173,7 @@ struct MXReferencePlayer: View {
             HStack(spacing: 0) {
                 footerButton("歌词", icon: "text.alignleft") { mode = "lyrics" }
                 footerButton("播放队列", icon: "list.bullet") { mode = "queue" }
-                VStack(spacing: 8) {
-                    MXLightAirPlayPicker()
-                        .frame(width: 26, height: 25)
-                    Text("音频输出").font(.system(size: 11))
-                        .foregroundStyle(MXLight.muted)
-                }.frame(maxWidth: .infinity)
+                footerButton("睡眠定时", icon: "moon.zzz", action: onSleepTimer)
                 footerButton("音质", icon: "gearshape", action: onQuality)
             }
             .padding(.horizontal, 12)
