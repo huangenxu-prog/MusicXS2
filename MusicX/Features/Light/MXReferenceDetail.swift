@@ -55,9 +55,12 @@ struct MXReferenceDetail: View {
         case .newReleases: "新歌速递"
         case .featuredPick: "我喜欢"
         case .charts, .chart: "排行榜"
-        case .featuredPlaylists, .playlists, .playlistByID, .playlist: "歌单详情"
-        case .album, .albums: "专辑详情"
-        case .musicCategory(let title, _, _, _): isArtist ? "歌手详情" : title
+        case .featuredPlaylists, .playlists: "推荐歌单"
+        case .playlistByID(let playlist): playlist.name
+        case .playlist(let name): name
+        case .album(let name, _): name
+        case .albums: "专辑"
+        case .musicCategory(let title, _, _, _): title
         }
     }
 
@@ -156,7 +159,7 @@ struct MXReferenceDetail: View {
                     .frame(width: 40, height: 42, alignment: .leading)
             }
             Spacer(minLength: 0)
-            Text(visibleTitle)
+            Text(visibleTitle.count > 16 ? "" : visibleTitle)
                 .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(MXLight.ink)
                 .lineLimit(1)
@@ -315,7 +318,7 @@ struct MXReferenceDetail: View {
             HStack(spacing: 10) {
                 chartTile("热歌榜", sub: "Top 50", icon: "music.note",
                           color: MXLight.pink)
-                chartTile("飙升榜", sub: "热度上升", icon: "shuffle",
+                chartTile("飙升榜", sub: "热度上升", icon: "arrow.up.right",
                           color: MXLight.cream)
                 chartTile("新歌榜", sub: "最新 50 首", icon: "opticaldisc",
                           color: MXLight.ochre)
