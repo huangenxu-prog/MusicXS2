@@ -125,6 +125,16 @@ private struct MusicXPageBackground: View {
 
 struct ContentView: View {
     @State private var selectedTab: MainTab = .home
+    @AppStorage("musicx.appearance") private var appearanceMode = "classic"
+    @State private var lightLibrarySegment = "recent"
+    @State private var isLightSettingsPresented = false
+    @State private var isLightPlaylistImportPresented = false
+    @State private var lightPlaylistLink = ""
+    @State private var lightPlaylistMessage: String?
+    @State private var lightPlaylistPreview: ImportedPlaylistSnapshot?
+    @State private var isLightPlaylistLoading = false
+    @State private var isLightSourceAuthPresented = false
+    @State private var isLightLXSourcePresented = false
     @Namespace private var tabSelectionNamespace
     @State private var searchText = ""
     @State private var searchSuggestions = ["十年", "突然好想你", "晴天", "青花瓷"]
@@ -327,7 +337,13 @@ struct ContentView: View {
             .onChange(of: discoveryRoute?.id) { oldValue, newValue in
                 if oldValue == nil && newValue != nil { isDiscoveryPopping = false }
             }
-            .onAppear { restorePlaybackSession() }
+            .onAppear {
+                restorePlaybackSession()
+                playerStore.setRepeatOneEnabled(repeatMode == 2)
+            }
+            .onChange(of: repeatMode) { _, newValue in
+                playerStore.setRepeatOneEnabled(newValue == 2)
+            }
             .onChange(of: scenePhase) { _, phase in
                 if phase != .active { savePlaybackSession() }
             }
@@ -342,6 +358,35 @@ struct ContentView: View {
             .onChange(of: playerStore.isPlaying) { _, _ in savePlaybackSession() }
             .onChange(of: playbackQueueSongs.map(\.id)) { _, _ in savePlaybackSession() }
             
+            .sheet(isPresented: $isLightSettingsPresented) {
+                MXLightSettings(
+                    appearance: $appearanceMode,
+                    onQuality: { isLightSettingsPresented = false; isSettingsAlertPresented = true },
+                    onSources: { isLightSettingsPresented = false; isLightSourceAuthPresented = true },
+                    onBackup: { isLightSettingsPresented = false; exportMusicBackup() },
+                    onRestore: { isLightSettingsPresented = false; isBackupImportPresented = true })
+            }
+            .sheet(isPresented: $isLightPlaylistImportPresented) {
+                lightPlaylistImportSheet
+            }
+            .alert("音源管理", isPresented: $isLightSourceAuthPresented) {
+                SecureField("输入暗号", text: $sourceAccessPhrase)
+                Button("取消", role: .cancel) { sourceAccessPhrase = "" }
+                Button("验证") {
+                    if sourceAccessPhrase == "qianxiao" {
+                        isLightLXSourcePresented = true
+                    } else {
+                        backupNotice = "别闹，暗号不对。"
+                        isBackupNoticePresented = true
+                    }
+                    sourceAccessPhrase = ""
+                }
+            } message: {
+                Text("音源管理需要验证暗号")
+            }
+            .sheet(isPresented: $isLightLXSourcePresented) {
+                LXSourceTestPanel().preferredColorScheme(.dark)
+            }
             .task { await loadHomeSongs() }
             .task { await loadOfficialCollections() }
     }
@@ -367,7 +412,7 @@ struct ContentView: View {
 
     private var playbackView: some View {
         appContent
-            .preferredColorScheme(.dark)
+            .preferredColorScheme(appearanceMode == "light" ? .light : .dark)
             .confirmationDialog("播放设置", isPresented: $isSettingsAlertPresented, titleVisibility: .visible) {
                 Button("标准音质 · 128 kbps") { playbackQualityRaw = MusicQuality.standard.rawValue }
                 Button("高音质 · 320 kbps") { playbackQualityRaw = MusicQuality.high.rawValue }
@@ -398,15 +443,23 @@ struct ContentView: View {
 
     private var appContent: some View {
         ZStack {
-            MusicXPageBackground()
+            if appearanceMode == "light" {
+                MXLight.background.ignoresSafeArea()
+            } else {
+                MusicXPageBackground()
+            }
             Group {
-                switch selectedTab {
-                case .home: homePage
-                case .search: searchPage
-                case .library: libraryPage
+                if appearanceMode == "light" {
+                    lightRootPage
+                } else {
+                    switch selectedTab {
+                    case .home: homePage
+                    case .search: searchPage
+                    case .library: libraryPage
+                    }
                 }
             }
-            .id(selectedTab)
+            .id(selectedTab.rawValue + appearanceMode)
             // Match native tab navigation: a subtle crossfade, rather than
             // a horizontal page push that can look like a backwards gesture.
             .transition(.opacity)
@@ -417,19 +470,23 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !(selectedTab == .search && searchFieldFocused) {
-                VStack(spacing: 8) {
-                    miniPlayer
-                    tabBar
-                }
-                .padding(.top, 8)
-                .padding(.bottom, 0)
-                .offset(y: 16)
-                .zIndex(20)
-                .background {
-                    LinearGradient(colors: [Color(red: 0.015, green: 0.035, blue: 0.085).opacity(0.02),
-                                                   Color(red: 0.012, green: 0.025, blue: 0.065).opacity(0.90)],
-                                   startPoint: .top, endPoint: .bottom)
-                        .ignoresSafeArea(edges: .bottom)
+                if appearanceMode == "light" {
+                    lightChrome
+                } else {
+                    VStack(spacing: 8) {
+                        miniPlayer
+                        tabBar
+                    }
+                    .padding(.top, 8)
+                    .padding(.bottom, 0)
+                    .offset(y: 16)
+                    .zIndex(20)
+                    .background {
+                        LinearGradient(colors: [Color(red: 0.015, green: 0.035, blue: 0.085).opacity(0.02),
+                                                       Color(red: 0.012, green: 0.025, blue: 0.065).opacity(0.90)],
+                                       startPoint: .top, endPoint: .bottom)
+                            .ignoresSafeArea(edges: .bottom)
+                    }
                 }
             }
         }
@@ -450,7 +507,17 @@ struct ContentView: View {
     @ViewBuilder
     private var discoveryOverlay: some View {
         if let route = discoveryRoute {
-            MusicDiscoveryPage(
+            Group {
+                if appearanceMode == "light" {
+                    MXLightDetail(
+                        route: route,
+                        favorites: favoriteSongs.compactMap(\.onlineSong),
+                        onBack: { discoveryRoute = nil },
+                        onPlay: { song, tracks in playCollectionTrack(song, in: tracks) },
+                        onOpen: { nextRoute in discoveryRoute = nextRoute }
+                    )
+                } else {
+                    MusicDiscoveryPage(
                 route: route,
                 featuredAlbums: [],
                 selectedMainTab: selectedTab.rawValue,
@@ -505,9 +572,11 @@ struct ContentView: View {
                     withAnimation(.easeInOut(duration: 0.28)) { discoveryRoute = .chart(chart) }
                 }
             )
+                }
+            }
             .id(route.id)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(MusicXPageBackground())
+            .background(appearanceMode == "light" ? MXLight.background : MusicXTheme.background)
             // Navigation direction is fixed: push enters from the right,
             // pop exits to the right. A transient back-navigation flag must
             // not reverse a newly inserted page during the same animation.
@@ -522,10 +591,223 @@ struct ContentView: View {
     @ViewBuilder
     private var playerOverlay: some View {
         if isPlayerPresented {
-            nowPlayingPage
+            Group {
+                if appearanceMode == "light" {
+                    lightNowPlaying
+                } else {
+                    nowPlayingPage
+                }
+            }
                 .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .trailing)))
                 .zIndex(40)
         }
+    }
+
+
+    // Warm-light views are fed by the SAME store and song queue as classic mode.
+    private func lightSong(_ track: AppSong) -> MXLightTrack {
+        MXLightTrack(id: track.id, title: track.title, artist: track.artist,
+                     album: track.album, artworkURL: track.onlineSong?.artworkURL)
+    }
+
+    private func lightPlaylist(_ item: MusicPlaylist) -> MXLightCollection {
+        MXLightCollection(id: item.id, name: item.name, count: item.trackCount, artworkURL: item.artworkURL)
+    }
+
+    private var lightImportedPlaylists: [ImportedPlaylistSnapshot] {
+        guard let data = importedPlaylistsJSON.data(using: .utf8) else { return [] }
+        return (try? JSONDecoder().decode([ImportedPlaylistSnapshot].self, from: data)) ?? []
+    }
+
+    private func openLightPlaylist(_ id: String) {
+        if let imported = lightImportedPlaylists.first(where: { $0.id == id }) {
+            discoveryRoute = .playlistByID(imported.displayPlaylist)
+        } else if let official = homeOfficialCollections.first(where: { $0.id == id }) {
+            discoveryRoute = .playlistByID(official)
+        }
+    }
+
+    private func openLightScene(_ keyword: String) {
+        discoveryRoute = .musicCategory(title: keyword, subtitle: "音乐分类",
+                                         artwork: "", keyword: keyword)
+    }
+
+    private func playLightHomeSong(_ id: Int) {
+        guard let tapped = songs.first(where: { $0.id == id }),
+              let track = tapped.onlineSong else { return }
+        playCollectionTrack(track, in: songs.compactMap(\.onlineSong))
+    }
+
+    private func playLightLibrarySong(_ id: Int, section: String) {
+        let displayed = section == "favorites" ? favoriteSongs : recentSongs
+        libraryFilter = section == "favorites" ? .favorites : .recent
+        guard let index = displayed.firstIndex(where: { $0.id == id }) else { return }
+        playLibrarySong(in: displayed, at: index)
+    }
+
+    @ViewBuilder private var lightRootPage: some View {
+        switch selectedTab {
+        case .home:
+            MXLightHome(
+                songs: songs.map(lightSong), collections: homeOfficialCollections.map(lightPlaylist),
+                onDaily: { discoveryRoute = .daily },
+                onFavorites: { discoveryRoute = .featuredPick },
+                onCharts: { discoveryRoute = .charts },
+                onNew: { discoveryRoute = .newReleases },
+                onAllCollections: { discoveryRoute = .featuredPlaylists },
+                onScene: openLightScene,
+                onSong: playLightHomeSong,
+                onCollection: openLightPlaylist,
+                onAlbum: { name, artist in discoveryRoute = .album(title: name, artist: artist) },
+                onArtist: { openLightScene($0) },
+                onSettings: { isLightSettingsPresented = true })
+        case .search:
+            MXLightSearch(
+                searchText: $searchText, songs: filteredSongs.map(lightSong),
+                isLoading: isSearching, onScene: openLightScene,
+                onSong: { id in
+                    if let found = filteredSongs.first(where: { $0.id == id }) {
+                        playSearchResult(found)
+                    }
+                })
+            .task(id: searchText) {
+                let keyword = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if keyword.isEmpty {
+                    onlineResults = []
+                    searchError = nil
+                } else {
+                    try? await Task.sleep(for: .milliseconds(450))
+                    if !Task.isCancelled { await searchOnline(keyword) }
+                }
+            }
+        case .library:
+            MXLightLibrary(
+                segment: $lightLibrarySegment, recent: recentSongs.map(lightSong),
+                favorites: favoriteSongs.map(lightSong),
+                playlists: lightImportedPlaylists.map { lightPlaylist($0.displayPlaylist) },
+                onSong: playLightLibrarySong,
+                onFavorite: { id in
+                    if let song = (favoriteSongs + recentSongs).first(where: { $0.id == id }) {
+                        toggleFavorite(song)
+                    }
+                },
+                onPlaylist: openLightPlaylist,
+                onImport: { isLightPlaylistImportPresented = true },
+                onSettings: { isLightSettingsPresented = true })
+        }
+    }
+
+    private var lightChrome: some View {
+        MXLightChrome(
+            selectedTab: selectedTab.rawValue,
+            onTab: { name in
+                if let tab = MainTab.allCases.first(where: { $0.rawValue == name }) {
+                    selectedTab = tab
+                }
+            },
+            now: currentSong.map(lightSong),
+            isPlaying: playerStore.isPlaying,
+            isResolving: isResolvingSong || playerStore.isBuffering,
+            onPlayer: { isPlayerPresented = true },
+            onPlayPause: { toggleCurrentPlayback() },
+            onNext: { stepSong(by: 1) }
+        )
+    }
+
+    private var lightNowPlaying: some View {
+        MXLightPlayer(
+            song: currentSong.map(lightSong), queue: playbackQueue.map(lightSong),
+            lyrics: lyricLines.map(\.text), activeLyricIndex: activeLyricIndex,
+            isPlaying: playerStore.isPlaying,
+            isLoading: isResolvingSong || playerStore.isBuffering,
+            currentTime: playerStore.currentTime, duration: playerStore.duration,
+            repeatMode: repeatMode, shuffle: isShuffleEnabled,
+            isFavorite: currentSong.map { favorites.contains($0.id) } ?? false,
+            mode: Binding(
+                get: {
+                    switch playerDisplayMode {
+                    case .artwork: "artwork"
+                    case .lyrics: "lyrics"
+                    case .queue: "queue"
+                    }
+                },
+                set: { name in
+                    switch name {
+                    case "lyrics": playerDisplayMode = .lyrics
+                    case "queue": playerDisplayMode = .queue
+                    default: playerDisplayMode = .artwork
+                    }
+                }
+            ),
+            onClose: { isPlayerPresented = false },
+            onPlayPause: { toggleCurrentPlayback() },
+            onNext: { stepSong(by: 1) },
+            onPrevious: { stepSong(by: -1) },
+            onSeek: { playerStore.seek(to: $0) },
+            onRepeat: { repeatMode = (repeatMode + 1) % 3 },
+            onShuffle: { isShuffleEnabled.toggle(); resetShuffleHistory() },
+            onFavorite: { if let song = currentSong { toggleFavorite(song) } },
+            onQueuePlay: { id in
+                if let song = playbackQueue.first(where: { $0.id == id }) { selectManually(song) }
+            },
+            onRemoveQueue: { id in
+                if let song = playbackQueue.first(where: { $0.id == id }) { removeFromQueue(song) }
+            },
+            onClearQueue: clearQueue
+        )
+    }
+
+    @MainActor private func previewLightImport() async {
+        lightPlaylistMessage = nil
+        lightPlaylistPreview = nil
+        isLightPlaylistLoading = true
+        defer { isLightPlaylistLoading = false }
+        do {
+            let result = try await PlatformCollectionCatalog().importSharedPlaylist(shareText: lightPlaylistLink)
+            lightPlaylistPreview = ImportedPlaylistSnapshot(playlist: result.playlist, songs: result.songs)
+        } catch {
+            lightPlaylistMessage = "导入失败：\(error.localizedDescription)"
+        }
+    }
+
+    private func saveLightImport() {
+        guard let preview = lightPlaylistPreview else { return }
+        var rows = lightImportedPlaylists
+        rows.removeAll { $0.id == preview.id }
+        rows.append(preview)
+        guard let data = try? JSONEncoder().encode(rows),
+              let json = String(data: data, encoding: .utf8) else { return }
+        importedPlaylistsJSON = json
+        isLightPlaylistImportPresented = false
+        lightPlaylistPreview = nil
+        lightPlaylistLink = ""
+    }
+
+    private var lightPlaylistImportSheet: some View {
+        NavigationStack {
+            Form {
+                Section("导入 QQ 音乐或网易云歌单") {
+                    TextField("粘贴歌单分享链接", text: $lightPlaylistLink, axis: .vertical)
+                        .autocorrectionDisabled().textInputAutocapitalization(.never)
+                    Button("解析歌单") { Task { await previewLightImport() } }
+                        .disabled(lightPlaylistLink.isEmpty || isLightPlaylistLoading)
+                    if isLightPlaylistLoading { ProgressView() }
+                    if let message = lightPlaylistMessage {
+                        Text(message).foregroundStyle(MXLight.red)
+                    }
+                    if let preview = lightPlaylistPreview {
+                        Text(preview.displayName)
+                        Text("\(preview.songs.count) 首歌曲").foregroundStyle(MXLight.muted)
+                        Button("保存到我的歌单", action: saveLightImport)
+                    }
+                }
+            }
+            .navigationTitle("导入歌单")
+            .toolbar { ToolbarItem(placement: .topBarTrailing) {
+                Button("关闭") { isLightPlaylistImportPresented = false }
+            } }
+        }
+        .preferredColorScheme(.light)
     }
 
     private var homePage: some View {
@@ -1130,6 +1412,12 @@ struct ContentView: View {
                             Label("音源管理", systemImage: "puzzlepiece.extension")
                         }
                         Divider()
+                        Menu {
+                            Button("经典深色版") { appearanceMode = "classic" }
+                            Button("暖色浅色版") { appearanceMode = "light" }
+                        } label: {
+                            Label("外观主题", systemImage: "paintbrush")
+                        }
                         Button {
                             exportMusicBackup()
                         } label: {
@@ -1670,7 +1958,7 @@ struct ContentView: View {
 
     @State private var playerDisplayMode: PlayerDisplayMode = .artwork
     @State private var isShuffleEnabled = false
-    @State private var repeatMode = 0
+    @AppStorage("musicx.repeatMode") private var repeatMode = 0
     @State private var resolvedArtworkURL: URL?
     @State private var lyricLines: [PlayerLyricLine] = []
     @State private var lyricsUnavailable = false
