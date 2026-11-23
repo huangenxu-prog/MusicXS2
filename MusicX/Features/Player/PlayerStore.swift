@@ -425,10 +425,16 @@ final class PlayerStore: ObservableObject {
 
     func togglePlayback() { wantsPlayback ? pause() : resume() }
 
-    /// Restart the current item after natural completion. Wait for the seek
-    /// completion before issuing play so repeat-one does not race AVPlayer's end state.
+    /// Single-track repeat must not leave AVPlayer in its automatic pause-at-end
+    /// state. This is configured independently of shuffle and queue-repeat.
+    func setRepeatOneEnabled(_ enabled: Bool) {
+        player.actionAtItemEnd = enabled ? .none : .pause
+    }
+
+    /// Restart even when a streaming item has an unknown or delayed duration.
+    /// Seek the PLAYER (not the finished AVPlayerItem) before resuming audio.
     func replayCurrentTrack() {
-        guard let item = player.currentItem, duration > 0 else { return }
+        guard let item = player.currentItem else { return }
         do {
             try AVAudioSession.sharedInstance().setActive(true)
         } catch {
@@ -441,7 +447,7 @@ final class PlayerStore: ObservableObject {
         errorMessage = nil
         seekRequestID = UUID()
         let requestID = seekRequestID
-        item.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self, weak item] finished in
+        player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self, weak item] finished in
             Task { @MainActor [weak self, weak item] in
                 guard let self, let item, finished,
                       self.player.currentItem === item,
