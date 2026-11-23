@@ -1131,8 +1131,8 @@ struct MXLightSettings: View {
 
     private var qualityName: String {
         switch MusicQuality(rawValue: qualityRaw) ?? .high {
-        case .standard: return "标准 128 kbps"
-        case .high: return "高音质 320 kbps"
+        case .standard: return "偏好 128 kbps"
+        case .high: return "偏好 320 kbps"
         case .lossless: return "无损"
         case .hires: return "Hi-Res"
         }
@@ -1217,15 +1217,9 @@ struct MXLightSettings: View {
 
                     sectionLabel("高级功能")
                     card {
-                        row("音源管理", icon: "lock",
-                            hint: "需要暗号", action: onSources)
+                        row("音源管理", icon: "music.note.list", action: onSources)
                     }
 
-                    Text("MusicX · 无需账号 · 专注听歌")
-                        .font(.system(size: 12))
-                        .foregroundStyle(MXLight.muted)
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 32)
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 20)
