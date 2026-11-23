@@ -388,7 +388,10 @@ struct MXLightHome: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 16) {
                             ForEach(Array(artists.prefix(9).enumerated()), id: \.element.id) { i, track in
-                                Button { onArtist(track.artist) } label: {
+                                Button {
+                                saveHistory(searchText)
+                                onArtist(track.artist)
+                            } label: {
                                     VStack(spacing: 8) {
                                         MXLightArtwork(url: track.artworkURL, size: 73, variant: i)
                                             .clipShape(Circle())
@@ -457,12 +460,16 @@ struct MXLightHome: View {
 struct MXLightSearch: View {
     @Binding var searchText: String
     let songs: [MXLightTrack]
+    let qqSongs: [MXLightTrack]
+    let neteaseSongs: [MXLightTrack]
+    let qqError: String?
+    let neteaseError: String?
     let playlists: [MXLightCollection]
     let currentTrackID: Int?
     let isPlaying: Bool
     let isLoading: Bool
     let onScene: (String) -> Void
-    let onSong: (Int) -> Void
+    let onSong: (Int, String) -> Void
     let isFavorite: (Int) -> Bool
     let onFavorite: (Int) -> Void
     let onAlbum: (String, String) -> Void
@@ -470,11 +477,26 @@ struct MXLightSearch: View {
     let onPlaylist: (String) -> Void
     @State private var selectedSource = "全部来源"
     @State private var showAllSongs = false
+    @State private var showSearchHistory = false
+    @State private var confirmClearHistory = false
+    @AppStorage("musicx.searchHistory.v1") private var searchHistoryJSON = "[]"
+
+    private var history: [String] {
+        (try? JSONDecoder().decode([String].self, from: Data(searchHistoryJSON.utf8))) ?? []
+    }
+
+    private var sourceError: String? {
+        switch selectedSource {
+        case "QQ 音乐": qqError
+        case "网易云": neteaseError
+        default: nil
+        }
+    }
 
     private var visibleSongs: [MXLightTrack] {
         switch selectedSource {
-        case "QQ 音乐": songs.filter { $0.source == .qq }
-        case "网易云": songs.filter { $0.source == .netease }
+        case "QQ 音乐": qqSongs
+        case "网易云": neteaseSongs
         default: songs
         }
     }
@@ -504,10 +526,15 @@ struct MXLightSearch: View {
                         .font(.system(size: 30, weight: .heavy))
                         .foregroundStyle(MXLight.ink)
                     Spacer()
-                    Image(systemName: "clock")
-                        .font(.system(size: 23))
-                        .foregroundStyle(MXLight.ink)
-                        .frame(width: 38, height: 38)
+                    Button { showSearchHistory = true } label: {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 23))
+                            .foregroundStyle(MXLight.ink)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("搜索历史")
                 }
                 .padding(.bottom, 23)
 
@@ -523,6 +550,8 @@ struct MXLightSearch: View {
                         .tint(MXLight.red)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
+                        .submitLabel(.search)
+                        .onSubmit { saveHistory(searchText) }
                         .onChange(of: searchText) { _, _ in showAllSongs = false }
                     if !searchText.isEmpty {
                         Button { searchText = "" } label: {
@@ -558,7 +587,10 @@ struct MXLightSearch: View {
                     MXLightSectionTitle(title: "热门搜索")
                         .padding(.top, 29)
                     ForEach(["周杰伦", "陈奕迅", "晴天", "夜曲", "后来"], id: \.self) { term in
-                        Button { searchText = term } label: {
+                        Button {
+                            saveHistory(term)
+                            searchText = term
+                        } label: {
                             HStack(spacing: 12) {
                                 Image(systemName: "arrow.up.right")
                                     .font(.system(size: 12))
@@ -606,7 +638,10 @@ struct MXLightSearch: View {
                         HStack(spacing: 0) {
                             MXLightTrackRow(
                                 track: song, index: i,
-                                onPlay: { onSong(song.id) },
+                                onPlay: {
+                                    saveHistory(searchText)
+                                    onSong(song.id, selectedSource)
+                                },
                                 onFavorite: { onFavorite(song.id) },
                                 favorite: isFavorite(song.id),
                                 isCurrent: song.id == currentTrackID,
@@ -655,7 +690,10 @@ struct MXLightSearch: View {
                     if !albums.isEmpty {
                         MXLightSectionTitle(title: "专辑").padding(.top, 27)
                         ForEach(Array(albums.prefix(5).enumerated()), id: \.element.id) { i, track in
-                            Button { onAlbum(track.album, track.artist) } label: {
+                            Button {
+                                saveHistory(searchText)
+                                onAlbum(track.album, track.artist)
+                            } label: {
                                 HStack(spacing: 12) {
                                     MXLightArtwork(url: track.artworkURL, size: 48, variant: i+3)
                                     VStack(alignment: .leading, spacing: 4) {
@@ -672,7 +710,10 @@ struct MXLightSearch: View {
                     if !visiblePlaylists.isEmpty {
                         MXLightSectionTitle(title: "歌单").padding(.top, 27)
                         ForEach(Array(visiblePlaylists.prefix(5).enumerated()), id: \.element.id) { i, item in
-                            Button { onPlaylist(item.id) } label: {
+                            Button {
+                                saveHistory(searchText)
+                                onPlaylist(item.id)
+                            } label: {
                                 HStack(spacing: 12) {
                                     MXLightArtwork(url: item.artworkURL, size: 48, variant: i)
                                     VStack(alignment: .leading, spacing: 4) {
@@ -689,10 +730,18 @@ struct MXLightSearch: View {
                         }
                     }
                     if !isLoading && visibleSongs.isEmpty && visiblePlaylists.isEmpty {
-                        Text("暂时没有搜索结果")
-                            .font(.system(size: 14))
-                            .foregroundStyle(MXLight.muted)
-                            .frame(maxWidth: .infinity).padding(.top, 25)
+                        VStack(spacing: 8) {
+                            Text(sourceError == nil ? "暂时没有搜索结果" : "当前来源搜索失败")
+                                .font(.system(size: 14))
+                                .foregroundStyle(MXLight.muted)
+                            if let sourceError {
+                                Text(sourceError)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(MXLight.muted)
+                                    .multilineTextAlignment(.center)
+                            }
+                        }
+                        .frame(maxWidth: .infinity).padding(.top, 25)
                     }
                 }
             }
@@ -701,6 +750,99 @@ struct MXLightSearch: View {
             .padding(.bottom, 30)
         }
         .background(MXLight.background)
+        .sheet(isPresented: $showSearchHistory) {
+            searchHistorySheet
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .preferredColorScheme(.light)
+        }
+    }
+
+    private var searchHistorySheet: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if history.isEmpty {
+                        Text("暂无搜索记录")
+                            .font(.system(size: 14))
+                            .foregroundStyle(MXLight.muted)
+                            .frame(maxWidth: .infinity, minHeight: 140)
+                    } else {
+                        ForEach(history, id: \.self) { term in
+                            HStack(spacing: 12) {
+                                Button {
+                                    saveHistory(term)
+                                    searchText = term
+                                    showSearchHistory = false
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: "clock.arrow.circlepath")
+                                            .foregroundStyle(MXLight.muted)
+                                        Text(term)
+                                            .foregroundStyle(MXLight.ink)
+                                            .lineLimit(1)
+                                        Spacer(minLength: 0)
+                                    }
+                                    .frame(maxWidth: .infinity, minHeight: 53)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                Button { removeHistory(term) } label: {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(MXLight.muted)
+                                        .frame(width: 44, height: 44)
+                                }
+                                .accessibilityLabel("删除历史：\(term)")
+                            }
+                            MXLight.line.frame(height: 0.5)
+                        }
+                    }
+                }
+                .padding(.horizontal, 24)
+            }
+            .background(MXLight.background)
+            .navigationTitle("搜索历史")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if !history.isEmpty {
+                        Button("清空") { confirmClearHistory = true }
+                            .foregroundStyle(MXLight.red)
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { showSearchHistory = false }
+                        .foregroundStyle(MXLight.teal)
+                }
+            }
+            .confirmationDialog("清空全部搜索历史？",
+                                isPresented: $confirmClearHistory,
+                                titleVisibility: .visible) {
+                Button("清空历史", role: .destructive) { searchHistoryJSON = "[]" }
+                Button("取消", role: .cancel) {}
+            }
+        }
+    }
+
+    private func saveHistory(_ raw: String) {
+        let keyword = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !keyword.isEmpty else { return }
+        var terms = history
+        terms.removeAll { $0.caseInsensitiveCompare(keyword) == .orderedSame }
+        terms.insert(keyword, at: 0)
+        if let encoded = try? JSONEncoder().encode(Array(terms.prefix(30))),
+           let text = String(data: encoded, encoding: .utf8) {
+            searchHistoryJSON = text
+        }
+    }
+
+    private func removeHistory(_ keyword: String) {
+        let remaining = history.filter { $0 != keyword }
+        if let data = try? JSONEncoder().encode(remaining),
+           let text = String(data: data, encoding: .utf8) {
+            searchHistoryJSON = text
+        }
     }
 }
 
