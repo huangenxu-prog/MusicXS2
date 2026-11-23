@@ -5,12 +5,18 @@ import SwiftUI
 enum MXLight {
     static let background = Color(red: 247/255, green: 245/255, blue: 241/255)
     static let ink = Color(red: 27/255, green: 26/255, blue: 23/255)
-    static let muted = Color(red: 107/255, green: 101/255, blue: 92/255)
+    static let muted = Color(red: 117/255, green: 111/255, blue: 101/255)
     static let teal = Color(red: 47/255, green: 93/255, blue: 98/255)
     static let red = Color(red: 217/255, green: 72/255, blue: 43/255)
     static let ochre = Color(red: 233/255, green: 180/255, blue: 76/255)
     static let line = Color(red: 230/255, green: 224/255, blue: 213/255)
-    static let paper = Color(red: 251/255, green: 250/255, blue: 247/255)
+    static let paper = Color(red: 255/255, green: 254/255, blue: 252/255)
+    static let cream = Color(red: 236/255, green: 228/255, blue: 214/255)
+    static let coal = Color(red: 59/255, green: 58/255, blue: 54/255)
+    static let pink = Color(red: 242/255, green: 184/255, blue: 166/255)
+    static let lightTeal = Color(red: 224/255, green: 233/255, blue: 231/255)
+    static let headingMuted = Color(red: 107/255, green: 101/255, blue: 92/255)
+    static let shadow = ink.opacity(0.075)
 }
 
 struct MXLightTrack: Identifiable {
@@ -19,6 +25,7 @@ struct MXLightTrack: Identifiable {
     let artist: String
     let album: String
     let artworkURL: URL?
+    var duration: TimeInterval? = nil
 }
 
 struct MXLightCollection: Identifiable {
@@ -28,10 +35,24 @@ struct MXLightCollection: Identifiable {
     let artworkURL: URL?
 }
 
+// The twelve fallback covers recreate the shapes in index.html (art c1...c12).
+// Actual QQ/NetEase cover images always take precedence over geometric art.
 struct MXLightArtwork: View {
     let url: URL?
     var size: CGFloat = 54
     var variant: Int = 0
+
+    private var pattern: Int { ((variant % 12) + 12) % 12 + 1 }
+    private var base: Color {
+        switch pattern {
+        case 1, 6, 12: MXLight.teal
+        case 2, 8: MXLight.red
+        case 3, 10: MXLight.coal
+        case 4, 7: MXLight.ochre
+        case 5, 11: MXLight.pink
+        default: MXLight.cream
+        }
+    }
 
     var body: some View {
         Group {
@@ -48,25 +69,54 @@ struct MXLightArtwork: View {
             }
         }
         .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: max(8, size * 0.13), style: .continuous))
+        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: max(7, size * 0.105),
+                                    style: .continuous))
     }
 
     private var geometric: some View {
         GeometryReader { proxy in
+            let n = proxy.size.width
             ZStack {
-                (variant % 3 == 0 ? MXLight.teal :
-                 variant % 3 == 1 ? MXLight.red : MXLight.ochre)
-                Circle()
-                    .fill(variant % 3 == 2 ? MXLight.teal : MXLight.ochre)
-                    .frame(width: proxy.size.width * 0.63)
-                    .offset(x: proxy.size.width * 0.12, y: -proxy.size.height * 0.07)
-                if variant % 2 == 0 {
-                    Rectangle()
-                        .fill(MXLight.paper.opacity(0.95))
-                        .frame(height: max(6, proxy.size.height * 0.21))
-                        .offset(y: proxy.size.height * 0.37)
+                base
+                switch pattern {
+                case 1:
+                    Circle().fill(MXLight.ochre).frame(width: n * 0.63, height: n * 0.63)
+                case 2:
+                    Rectangle().fill(MXLight.background).frame(height: n / 3)
+                case 3:
+                    Circle().stroke(MXLight.ochre, lineWidth: max(3, n * 0.09))
+                        .frame(width: n * 0.55, height: n * 0.55)
+                case 4:
+                    Circle().fill(MXLight.teal).frame(width: n * 0.54)
+                        .offset(x: n * 0.41, y: n * 0.41)
+                case 5:
+                    Circle().fill(MXLight.red).frame(width: n * 0.42)
+                case 6:
+                    Circle().fill(MXLight.red).frame(width: n * 0.85)
+                        .offset(x: n * 0.51, y: -n * 0.46)
+                    Circle().fill(MXLight.ochre).frame(width: n * 0.60)
+                        .offset(x: -n * 0.51, y: n * 0.49)
+                case 7:
+                    Rectangle().fill(MXLight.pink).frame(height: n * 0.34)
+                case 8:
+                    Circle().stroke(MXLight.ochre, lineWidth: max(3, n * 0.09))
+                        .frame(width: n * 0.50)
+                case 9:
+                    Circle().fill(MXLight.teal).frame(width: n * 0.90)
+                        .offset(y: n * 0.48)
+                case 10:
+                    Rectangle().fill(MXLight.pink).frame(width: n * 0.36, height: n * 1.5)
+                        .rotationEffect(.degrees(45))
+                case 11:
+                    Circle().fill(MXLight.ochre).frame(width: n * 0.70)
+                        .offset(x: -n * 0.45, y: -n * 0.45)
+                default:
+                    Rectangle().fill(MXLight.cream).frame(width: n * 1.2, height: n * 0.32)
+                        .rotationEffect(.degrees(-24)).offset(y: n * 0.20)
                 }
             }
+            .frame(width: n, height: n)
             .clipped()
         }
     }
@@ -75,18 +125,20 @@ struct MXLightArtwork: View {
 struct MXLightSectionTitle: View {
     let title: String
     var onMore: (() -> Void)? = nil
+    var moreLabel = "查看全部"
 
     var body: some View {
-        HStack {
+        HStack(alignment: .firstTextBaseline) {
             Text(title)
-                .font(.system(size: 19, weight: .bold))
-                .foregroundStyle(MXLight.ink)
+                .font(.system(size: 15, weight: .bold))
+                .tracking(1.9)
+                .foregroundStyle(MXLight.headingMuted)
             Spacer()
             if let onMore {
                 Button(action: onMore) {
-                    HStack(spacing: 4) {
-                        Text("查看全部")
-                        Image(systemName: "chevron.right").font(.system(size: 11))
+                    HStack(spacing: 3) {
+                        Text(moreLabel)
+                        Image(systemName: "chevron.right").font(.system(size: 10))
                     }
                     .font(.system(size: 12))
                     .foregroundStyle(MXLight.muted)
@@ -104,11 +156,17 @@ struct MXLightTrackRow: View {
     var onFavorite: (() -> Void)? = nil
     var favorite = false
 
+    private var durationText: String? {
+        guard let seconds = track.duration, seconds.isFinite, seconds > 0 else { return nil }
+        let total = Int(seconds)
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             Button(action: onPlay) {
                 HStack(spacing: 12) {
-                    MXLightArtwork(url: track.artworkURL, size: 50, variant: index)
+                    MXLightArtwork(url: track.artworkURL, size: 48, variant: index)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(track.title)
                             .font(.system(size: 15, weight: .semibold))
@@ -124,6 +182,12 @@ struct MXLightTrackRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            if let durationText {
+                Text(durationText)
+                    .font(.system(size: 12))
+                    .foregroundStyle(MXLight.muted)
+                    .monospacedDigit()
+            }
             Menu {
                 Button("播放", systemImage: "play.fill", action: onPlay)
                 if let onFavorite {
@@ -134,8 +198,8 @@ struct MXLightTrackRow: View {
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(MXLight.ink)
-                    .frame(width: 42, height: 44)
+                    .foregroundStyle(MXLight.muted)
+                    .frame(width: 28, height: 44)
                     .contentShape(Rectangle())
             }
             .accessibilityLabel("更多操作：\(track.title)")
