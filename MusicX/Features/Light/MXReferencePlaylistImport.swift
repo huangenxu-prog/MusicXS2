@@ -21,9 +21,7 @@ struct MXReferencePlaylistImport: View {
                 Spacer()
                 Text("导入歌单").font(.system(size: 16, weight: .bold))
                 Spacer()
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 20))
-                    .frame(width: 40, height: 42, alignment: .trailing)
+                Color.clear.frame(width: 40, height: 42)
                     .accessibilityHidden(true)
             }
             .foregroundStyle(MXLight.ink)
@@ -159,13 +157,6 @@ struct MXReferencePlaylistImport: View {
                             .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
                     }
 
-                    Text("导入过程仅处理公开歌单元数据，不影响原平台歌单。")
-                        .font(.system(size: 12))
-                        .foregroundStyle(MXLight.muted)
-                        .padding(13)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(MXLight.cream, in: RoundedRectangle(cornerRadius: 12))
-                        .padding(.top, 25)
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 20)
