@@ -52,10 +52,9 @@ struct MXReferenceSources: View {
                 Spacer()
                 Text("音源管理").font(.system(size: 16, weight: .bold))
                 Spacer()
-                Button { showAdvanced = true } label: {
-                    Image(systemName: "ellipsis")
-                        .frame(width: 40, height: 42, alignment: .trailing)
-                }
+                // Advanced testing has one explicit row below; no duplicate top menu.
+                Color.clear.frame(width: 40, height: 42)
+                    .accessibilityHidden(true)
             }
             .font(.system(size: 19))
             .foregroundStyle(MXLight.ink)
@@ -63,7 +62,7 @@ struct MXReferenceSources: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("高级功能 · 云端同步、导入、测试并启用音源。未经试听通过的音源不会进入正式播放通道。")
+                    Text("云端同步会更新本地音源配置。新导入的 JS 音源需先通过试听验证，才能用于正式播放。")
                         .font(.system(size: 12))
                         .foregroundStyle(MXLight.muted)
                         .padding(14)
@@ -75,13 +74,30 @@ struct MXReferenceSources: View {
                             Task { await syncCloud() }
                         }
                         MXLight.line.frame(height: 0.5)
-                        actionRow("从文件导入 JS 音源", icon: "square.and.arrow.down") {
-                            showJSImporter = true
+                        Menu {
+                            Button("从文件导入 JS 音源", systemImage: "doc") {
+                                showJSImporter = true
+                            }
+                            Button("从网址导入 JS 音源", systemImage: "link") {
+                                remoteURL = ""
+                                showURLImporter = true
+                            }
+                        } label: {
+                            actionLabel("导入音源", icon: "plus")
                         }
                         MXLight.line.frame(height: 0.5)
-                        actionRow("从网址导入音源", icon: "plus") {
-                            remoteURL = ""
-                            showURLImporter = true
+                        actionRow("音源测试与高级管理", icon: "checkmark.shield") {
+                            showAdvanced = true
+                        }
+                        MXLight.line.frame(height: 0.5)
+                        Menu {
+                            Button("导出音源配置备份", systemImage: "square.and.arrow.up",
+                                   action: exportBackup)
+                            Button("从本地备份恢复", systemImage: "square.and.arrow.down") {
+                                showBackupImporter = true
+                            }
+                        } label: {
+                            actionLabel("音源配置备份", icon: "externaldrive")
                         }
                     }
                     .padding(.horizontal, 14)
@@ -138,52 +154,10 @@ struct MXReferenceSources: View {
                         MXLight.line.frame(height: 0.5)
                     }
 
-                    section("音源测试")
-                    VStack(spacing: 0) {
-                        ForEach(["QQ 音乐", "网易云音乐", "酷我音乐", "酷狗音乐"], id: \.self) { platform in
-                            Button {
-                                showAdvanced = true
-                            } label: {
-                                HStack {
-                                    Text(platform)
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundStyle(MXLight.ink)
-                                    Spacer()
-                                    Text("进入测试")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(MXLight.muted)
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(MXLight.muted)
-                                }
-                                .frame(height: 53)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            if platform != "酷狗音乐" {
-                                MXLight.line.frame(height: 0.5)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 15)
-                    .background(MXLight.paper, in: RoundedRectangle(cornerRadius: 16))
-
-                    HStack(spacing: 12) {
-                        Button("导出配置", action: exportBackup)
-                            .buttonStyle(MXReferencePill(isPrimary: false))
-                        Button("从备份恢复") { showBackupImporter = true }
-                            .buttonStyle(MXReferencePill(isPrimary: false))
-                    }
-                    .padding(.top, 20)
-                    Button("打开高级音源测试与管理") { showAdvanced = true }
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(MXLight.red)
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 18)
-                    Text("启用开关只修改对应音源的正式播放通道，未经试听批准的音源需要先在高级测试中验证。")
+                    Text("已批准的音源可直接启停；测试、平台通道细节与删除操作统一在「音源测试与高级管理」中处理。")
                         .font(.system(size: 11))
                         .foregroundStyle(MXLight.muted)
-                        .padding(.top, 12)
+                        .padding(.top, 18)
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 20)
@@ -258,21 +232,26 @@ struct MXReferenceSources: View {
         .padding(.bottom, 13)
     }
 
+    private func actionLabel(_ title: String, icon: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 17))
+                .frame(width: 34, height: 34)
+                .background(MXLight.cream, in: Circle())
+            Text(title).font(.system(size: 14, weight: .semibold))
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13))
+        }
+        .foregroundStyle(MXLight.ink)
+        .frame(height: 57)
+        .contentShape(Rectangle())
+    }
+
     private func actionRow(_ title: String, icon: String,
                            action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: icon)
-                    .font(.system(size: 17))
-                    .frame(width: 34, height: 34)
-                    .background(MXLight.cream, in: Circle())
-                Text(title).font(.system(size: 14, weight: .semibold))
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13))
-            }
-            .foregroundStyle(MXLight.ink)
-            .frame(height: 57)
+            actionLabel(title, icon: icon)
         }
         .buttonStyle(.plain)
     }
