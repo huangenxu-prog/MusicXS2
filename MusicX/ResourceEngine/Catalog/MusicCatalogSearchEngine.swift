@@ -114,8 +114,21 @@ struct MusicCatalogSearchEngine {
         try await provider.playlistTracks(playlistID: playlistID, source: source, count: count)
     }
 
-    func toplist(_ chartName: String, count: Int = 50) async throws -> [MusicSong] {
-        try await provider.toplist(chartName, count: count)
+    // Rankings refresh every two hours. A failed refresh keeps the last valid snapshot.
+    func toplist(_ chartName: String, count: Int = 50, forceRefresh: Bool = false) async throws -> [MusicSong] {
+        let key = "catalog-chart-v2|\(chartName)|\(count)"
+        let cached: MusicCatalogStore.Snapshot<[MusicSong]>? =
+            await MusicCatalogStore.shared.snapshot(for: key)
+        if let cached, !cached.needsRefresh, !forceRefresh { return cached.value }
+        do {
+            let fresh = try await provider.toplist(chartName, count: count)
+            guard !fresh.isEmpty else { return cached?.value ?? [] }
+            await MusicCatalogStore.shared.save(fresh, for: key, refreshAfter: 2 * 60 * 60)
+            return fresh
+        } catch {
+            if let cached { return cached.value }
+            throw error
+        }
     }
 
 }
