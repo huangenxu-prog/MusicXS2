@@ -113,8 +113,19 @@ struct MusicCatalogSearchEngine {
         try await provider.qqDailyRecommendedSongs(count: count)
     }
 
-    func playlistTracks(keyword: String, count: Int = 50) async throws -> [MusicSong] {
-        try await provider.playlistTracks(keyword: keyword, count: count)
+    func playlistTracks(keyword: String, count: Int = 50, forceRefresh: Bool = false) async throws -> [MusicSong] {
+        let key = "catalog-playlist-keyword-v2|\(keyword)|\(count)"
+        let cached: MusicCatalogStore.Snapshot<[MusicSong]>? = await MusicCatalogStore.shared.snapshot(for: key)
+        if let cached, !cached.needsRefresh, !forceRefresh { return cached.value }
+        do {
+            let fresh = try await provider.playlistTracks(keyword: keyword, count: count)
+            guard !fresh.isEmpty else { return cached?.value ?? [] }
+            await MusicCatalogStore.shared.save(fresh, for: key, refreshAfter: 6 * 60 * 60)
+            return fresh
+        } catch {
+            if let cached { return cached.value }
+            throw error
+        }
     }
 
     func playlistTracks(playlistID: String, count: Int = 50) async throws -> [MusicSong] {
