@@ -994,7 +994,6 @@ struct ContentView: View {
         ZStack(alignment: .top) {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 15) {
-                    HomeScrollBounceDisabler().frame(width: 0, height: 0)
                     heroAndRecommendation
                     chartSection
                     newMusicSection
@@ -1003,7 +1002,7 @@ struct ContentView: View {
                 .padding(.top, 0)
                 .padding(.bottom, 8)
             }
-            .scrollBounceBehavior(.basedOnSize)
+            .scrollBounceBehavior(.always)
             .refreshable { await refreshGlobalCatalog() }
         }
         .background {
