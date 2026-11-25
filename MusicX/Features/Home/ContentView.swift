@@ -260,6 +260,7 @@ struct ContentView: View {
     @State private var isLoadingOfficialCollections = false
     @State private var officialCollectionsError: String?
     @State private var isLoadingHomeSongs = false
+    @State private var globalCatalogRefreshTask: Task<Void, Never>?
     @State private var homeLoadError: String?
     @State private var discoveryRoute: MusicDiscoveryRoute?
     @State private var lightRouteHistory: [MusicDiscoveryRoute] = []
@@ -3093,6 +3094,22 @@ struct ContentView: View {
 
     @MainActor
     private func refreshGlobalCatalog() async {
+        if let running = globalCatalogRefreshTask {
+            await running.value
+            return
+        }
+        // SwiftUI owns the refreshable action and can cancel it on view updates.
+        // Keep the actual catalog work in a separately owned, coalesced task.
+        let worker = Task { @MainActor in
+            defer { globalCatalogRefreshTask = nil }
+            await performGlobalCatalogRefresh()
+        }
+        globalCatalogRefreshTask = worker
+        await worker.value
+    }
+
+    @MainActor
+    private func performGlobalCatalogRefresh() async {
         let started = Date()
         MusicSourceDiagnostics.shared.record(event: "home-refresh", source: "home", provider: appearanceMode, duration: 0, result: "start")
         defer {
