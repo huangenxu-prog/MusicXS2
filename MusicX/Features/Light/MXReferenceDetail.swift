@@ -136,7 +136,6 @@ struct MXReferenceDetail: View {
                 .padding(.top, 18)
                 .padding(.bottom, 28)
             }
-            .refreshable { await load(forceRefresh: true) }
         }
         .background(MXLight.background.ignoresSafeArea())
         .preferredColorScheme(.light)
