@@ -380,6 +380,7 @@ struct ContentView: View {
                     savePlaybackSession()
                 } else {
                     scheduleSleepTimer()
+                    Task { await loadHomeSongs() }
                 }
             }
             .onChange(of: sleepTimerDeadline) { _, _ in
@@ -1002,6 +1003,7 @@ struct ContentView: View {
                 .padding(.bottom, 8)
             }
             .scrollBounceBehavior(.basedOnSize)
+            .refreshable { await loadHomeSongs(forceRefresh: true) }
         }
         .background {
             let navy = Color(red: 10/255, green: 14/255, blue: 31/255)
@@ -3085,14 +3087,14 @@ struct ContentView: View {
     }
 
     @MainActor
-    private func loadHomeSongs() async {
-        guard songs.isEmpty, !isLoadingHomeSongs else { return }
+    private func loadHomeSongs(forceRefresh: Bool = false) async {
+        guard !isLoadingHomeSongs else { return }
         isLoadingHomeSongs = true
         homeLoadError = nil
         defer { isLoadingHomeSongs = false }
 
         do {
-            let latestTracks = try await MusicCatalogSearchEngine().toplist("新歌榜", count: 50)
+            let latestTracks = try await MusicCatalogSearchEngine().toplist("新歌榜", count: 50, forceRefresh: forceRefresh)
             guard !Task.isCancelled else { return }
             songs = latestTracks.map { item in
                 AppSong(
@@ -3107,8 +3109,7 @@ struct ContentView: View {
             homeLoadError = nil
         } catch {
             guard !Task.isCancelled else { return }
-            songs = []
-            homeLoadError = "内容暂时无法加载，请稍后重试"
+            if songs.isEmpty { homeLoadError = "内容暂时无法加载，请稍后重试" }
         }
     }
 
