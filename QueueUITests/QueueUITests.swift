@@ -27,7 +27,9 @@ final class QueueUITests: XCTestCase {
         for _ in 0..<5 where !row.isHittable { app.scrollViews.firstMatch.swipeUp() }
         row.tap()
         app.buttons["mini-open-player"].tap()
-        app.buttons["播放队列"].firstMatch.tap()
+        let queueButton = app.buttons["player-open-queue"]
+        XCTAssertTrue(queueButton.waitForExistence(timeout: 10), app.debugDescription)
+        queueButton.tap()
         // Recent Plays and Favorites must both build the full 27-song queue.
         // The previous test incorrectly locked in an empty Recent queue.
         XCTAssertTrue(app.staticTexts["27 首"].waitForExistence(timeout: 5), app.debugDescription)
