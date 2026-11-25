@@ -2,8 +2,8 @@ import Foundation
 
 /// Platform recommendation feeds are not necessarily official editorial collections.
 /// Preserve their provenance and native playlist IDs; do not infer editorial ownership.
-struct PlatformCollection: Identifiable, Sendable {
-    enum Provider: String, Sendable { case qq, netease }
+struct PlatformCollection: Identifiable, Sendable, Codable {
+    enum Provider: String, Sendable, Codable { case qq, netease }
     let provider: Provider
     let sourceID: String
     let name: String
@@ -29,10 +29,23 @@ struct PlatformCollectionCatalog {
 
     /// Keep platform catalogs independent, including same-name collections.
     func remainingRecommendedCollections() async throws -> [PlatformCollection] {
-        async let qq = qqRecommendations()
-        async let netease = neteaseRecommendations()
-        let (qqRows, neteaseRows) = try await (qq, netease)
-        return Array(qqRows.dropFirst()) + Array(neteaseRows.dropFirst())
+        let key = "home-collections-v4"
+        let cached: MusicCatalogStore.Snapshot<[PlatformCollection]>? = await MusicCatalogStore.shared.snapshot(for: key)
+        if let cached, !cached.needsRefresh { return cached.value }
+        do {
+            async let qq = qqRecommendations()
+            async let netease = neteaseRecommendations()
+            let (qqRows, neteaseRows) = try await (qq, netease)
+            let fresh = Array(qqRows.dropFirst()) + Array(neteaseRows.dropFirst())
+            if !fresh.isEmpty {
+                await MusicCatalogStore.shared.save(fresh, for: key, refreshAfter: 12 * 60 * 60)
+                return fresh
+            }
+            return cached?.value ?? []
+        } catch {
+            if let cached { return cached.value }
+            throw error
+        }
     }
 
     /// A catalog request is not equivalent to loading every track. Load tracks
@@ -117,11 +130,24 @@ struct PlatformCollectionCatalog {
     /// Only the first collection is used; do not fill from later playlists.
     func firstCollectionSongs(provider: PlatformCollection.Provider, count: Int = 50) async throws -> [MusicSong] {
         guard count > 0 else { return [] }
-        let collections = try await (provider == .qq ? qqRecommendations() : neteaseRecommendations())
-        guard let first = collections.first else {
-            throw MusicSourceError.invalidResponse("平台没有返回推荐合集")
+        let key = "daily-platform-collection-v4|\(provider.rawValue)|\(count)"
+        let cached: MusicCatalogStore.Snapshot<[MusicSong]>? = await MusicCatalogStore.shared.snapshot(for: key)
+        if let cached, !cached.needsRefresh { return cached.value }
+        do {
+            let collections = try await (provider == .qq ? qqRecommendations() : neteaseRecommendations())
+            guard let first = collections.first else {
+                throw MusicSourceError.invalidResponse("平台没有返回推荐合集")
+            }
+            let fresh = try await tracks(for: first, count: count)
+            if !fresh.isEmpty {
+                await MusicCatalogStore.shared.save(fresh, for: key, refreshAfter: 24 * 60 * 60)
+                return fresh
+            }
+            return cached?.value ?? []
+        } catch {
+            if let cached { return cached.value }
+            throw error
         }
-        return try await tracks(for: first, count: count)
     }
 
     /// Merge the first QQ and the first NetEase playlist, at most 50 unique songs.
