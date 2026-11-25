@@ -23,9 +23,9 @@ actor MusicCatalogStore {
     private let directory: URL
     private var invalidatedAt: Date = .distantPast
 
-    func invalidateAll() {
+    func invalidateHomeContent() {
         invalidatedAt = Date()
-        UserDefaults.standard.set(invalidatedAt, forKey: "MusicXCatalog.invalidatedAt")
+        UserDefaults.standard.set(invalidatedAt, forKey: "MusicXCatalog.homeInvalidatedAt")
     }
 
     private init() {
@@ -45,7 +45,14 @@ actor MusicCatalogStore {
               let value = try? JSONDecoder().decode(Value.self, from: envelope.payload) else {
             return nil
         }
-        return Snapshot(value: value, updatedAt: envelope.updatedAt, refreshAfter: envelope.updatedAt < invalidatedAt ? .distantPast : envelope.refreshAfter)
+        // Only discovery feeds are affected by a manual home refresh.
+        // Individual playlists, albums and other snapshots keep their original TTL.
+        let homeFeed = key.hasPrefix("catalog-chart-")
+            || key.hasPrefix("catalog-featured-")
+            || key.hasPrefix("home-collections-")
+            || key.hasPrefix("daily-platform-collection-")
+        let expired = homeFeed && envelope.updatedAt < invalidatedAt
+        return Snapshot(value: value, updatedAt: envelope.updatedAt, refreshAfter: expired ? .distantPast : envelope.refreshAfter)
     }
 
     func save<Value: Codable>(_ value: Value, for key: String, refreshAfter interval: TimeInterval) {
