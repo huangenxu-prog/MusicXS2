@@ -21,8 +21,15 @@ actor MusicCatalogStore {
     }
 
     private let directory: URL
+    private var invalidatedAt: Date = .distantPast
+
+    func invalidateAll() {
+        invalidatedAt = Date()
+        UserDefaults.standard.set(invalidatedAt, forKey: "MusicXCatalog.invalidatedAt")
+    }
 
     private init() {
+        invalidatedAt = UserDefaults.standard.object(forKey: "MusicXCatalog.invalidatedAt") as? Date ?? .distantPast
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         directory = support.appendingPathComponent("MusicXCatalog", isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -38,7 +45,7 @@ actor MusicCatalogStore {
               let value = try? JSONDecoder().decode(Value.self, from: envelope.payload) else {
             return nil
         }
-        return Snapshot(value: value, updatedAt: envelope.updatedAt, refreshAfter: envelope.refreshAfter)
+        return Snapshot(value: value, updatedAt: envelope.updatedAt, refreshAfter: envelope.updatedAt < invalidatedAt ? .distantPast : envelope.refreshAfter)
     }
 
     func save<Value: Codable>(_ value: Value, for key: String, refreshAfter interval: TimeInterval) {
