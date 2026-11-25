@@ -31,18 +31,30 @@ struct PlatformCollectionCatalog {
     func remainingRecommendedCollections(forceRefresh: Bool = false) async throws -> [PlatformCollection] {
         let key = "home-collections-v4"
         let cached: MusicCatalogStore.Snapshot<[PlatformCollection]>? = await MusicCatalogStore.shared.snapshot(for: key)
-        if let cached, !cached.needsRefresh, !forceRefresh { return cached.value }
+        let started = Date()
+        func report(_ result: String, _ detail: String) {
+            MusicSourceDiagnostics.shared.record(event: "catalog-refresh", source: "qq+netease", provider: "recommended-collections", duration: Date().timeIntervalSince(started), result: result, detail: detail)
+        }
+        if let cached, !cached.needsRefresh, !forceRefresh {
+            report("cache-hit", "count=\(cached.value.count)")
+            return cached.value
+        }
+        report("request-start", "force=\(forceRefresh) oldCount=\(cached?.value.count ?? 0)")
         do {
             async let qq = qqRecommendations()
             async let netease = neteaseRecommendations()
             let (qqRows, neteaseRows) = try await (qq, netease)
             let fresh = Array(qqRows.dropFirst()) + Array(neteaseRows.dropFirst())
             if !fresh.isEmpty {
+                let unchanged = cached?.value.map(\.id) == fresh.map(\.id)
+                report(unchanged ? "network-unchanged" : "network-changed", "oldCount=\(cached?.value.count ?? 0) newCount=\(fresh.count)")
                 await MusicCatalogStore.shared.save(fresh, for: key, refreshAfter: 12 * 60 * 60)
                 return fresh
             }
+            report(cached == nil ? "empty" : "cache-fallback", "reason=empty count=\(cached?.value.count ?? 0)")
             return cached?.value ?? []
         } catch {
+            report(cached == nil ? "failed" : "cache-fallback", "reason=error count=\(cached?.value.count ?? 0) code=\((error as NSError).code)")
             if let cached { return cached.value }
             throw error
         }
@@ -82,6 +94,12 @@ struct PlatformCollectionCatalog {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("https://y.qq.com/", forHTTPHeaderField: "Referer")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let started = Date()
+        var outcome = "failed"
+        var returnedCount = 0
+        defer {
+            MusicSourceDiagnostics.shared.record(event: "catalog-provider", source: "qq", provider: "recommendation-feed", duration: Date().timeIntervalSince(started), result: outcome, detail: "count=\(returnedCount)")
+        }
         let root = try await json(for: request)
         let envelope = root["req_0"] as? [String: Any] ?? [:]
         let data = envelope["data"] as? [String: Any] ?? [:]
@@ -100,6 +118,8 @@ struct PlatformCollectionCatalog {
         guard !collections.isEmpty else {
             throw MusicSourceError.invalidResponse("QQ 推荐合集接口没有返回有效内容")
         }
+        outcome = "success"
+        returnedCount = collections.count
         return collections
     }
 
@@ -110,6 +130,12 @@ struct PlatformCollectionCatalog {
         request.timeoutInterval = 12
         request.setValue("https://music.163.com/", forHTTPHeaderField: "Referer")
         request.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+        let started = Date()
+        var outcome = "failed"
+        var returnedCount = 0
+        defer {
+            MusicSourceDiagnostics.shared.record(event: "catalog-provider", source: "netease", provider: "recommendation-feed", duration: Date().timeIntervalSince(started), result: outcome, detail: "count=\(returnedCount)")
+        }
         let root = try await json(for: request)
         let rows = root["result"] as? [[String: Any]] ?? root["data"] as? [[String: Any]] ?? []
         let collections = rows.compactMap { row -> PlatformCollection? in
@@ -124,6 +150,8 @@ struct PlatformCollectionCatalog {
         guard !collections.isEmpty else {
             throw MusicSourceError.invalidResponse("网易云推荐合集接口没有返回有效内容")
         }
+        outcome = "success"
+        returnedCount = collections.count
         return collections
     }
 
@@ -132,7 +160,15 @@ struct PlatformCollectionCatalog {
         guard count > 0 else { return [] }
         let key = "daily-platform-collection-v4|\(provider.rawValue)|\(count)"
         let cached: MusicCatalogStore.Snapshot<[MusicSong]>? = await MusicCatalogStore.shared.snapshot(for: key)
-        if let cached, !cached.needsRefresh, !forceRefresh { return cached.value }
+        let started = Date()
+        func report(_ result: String, _ detail: String) {
+            MusicSourceDiagnostics.shared.record(event: "catalog-refresh", source: provider.rawValue, provider: "daily-recommendations", duration: Date().timeIntervalSince(started), result: result, detail: detail)
+        }
+        if let cached, !cached.needsRefresh, !forceRefresh {
+            report("cache-hit", "count=\(cached.value.count)")
+            return cached.value
+        }
+        report("request-start", "force=\(forceRefresh) oldCount=\(cached?.value.count ?? 0)")
         do {
             let collections = try await (provider == .qq ? qqRecommendations() : neteaseRecommendations())
             guard let first = collections.first else {
@@ -140,11 +176,15 @@ struct PlatformCollectionCatalog {
             }
             let fresh = try await tracks(for: first, count: count)
             if !fresh.isEmpty {
+                let unchanged = cached?.value.map(\.id) == fresh.map(\.id)
+                report(unchanged ? "network-unchanged" : "network-changed", "oldCount=\(cached?.value.count ?? 0) newCount=\(fresh.count)")
                 await MusicCatalogStore.shared.save(fresh, for: key, refreshAfter: 2 * 60 * 60)
                 return fresh
             }
+            report(cached == nil ? "empty" : "cache-fallback", "reason=empty count=\(cached?.value.count ?? 0)")
             return cached?.value ?? []
         } catch {
+            report(cached == nil ? "failed" : "cache-fallback", "reason=error count=\(cached?.value.count ?? 0) code=\((error as NSError).code)")
             if let cached { return cached.value }
             throw error
         }

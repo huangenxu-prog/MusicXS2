@@ -252,11 +252,13 @@ struct MusicXLegacySupplierLibrary: MusicResourceProvider, MusicCatalogSearchPro
         configuration.urlCache = nil
         let catalogSession = URLSession(configuration: configuration)
         defer { catalogSession.finishTasksAndInvalidate() }
-        async let netease: [MusicSong]? = try? await NetEaseNativeAPIClient(session: catalogSession)
-            .toplist(chartName, count: limit)
-        async let qq: [MusicSong]? = try? await GDStudioMusicSearchService(session: catalogSession)
-            .toplist(chartName, count: limit)
-        let groups = [await netease ?? [], await qq ?? []]
+        async let netease = diagnosedChart(source: "netease", provider: "native", chart: chartName) {
+            try await NetEaseNativeAPIClient(session: catalogSession).toplist(chartName, count: limit)
+        }
+        async let qq = diagnosedChart(source: "qq", provider: "gdstudio", chart: chartName) {
+            try await GDStudioMusicSearchService(session: catalogSession).toplist(chartName, count: limit)
+        }
+        let groups = [await netease, await qq]
         try Task.checkCancellation()
 
         func normalized(_ value: String) -> String {
@@ -273,6 +275,18 @@ struct MusicXLegacySupplierLibrary: MusicResourceProvider, MusicCatalogSearchPro
         }
         return Array(merged.prefix(limit))
     }
+    private func diagnosedChart(source: String, provider: String, chart: String, fetch: () async throws -> [MusicSong]) async -> [MusicSong] {
+        let started = Date()
+        do {
+            let rows = try await fetch()
+            MusicSourceDiagnostics.shared.record(event: "catalog-provider", source: source, provider: provider, duration: Date().timeIntervalSince(started), result: rows.isEmpty ? "empty" : "success", detail: "chart=\(chart) count=\(rows.count)")
+            return rows
+        } catch {
+            MusicSourceDiagnostics.shared.record(event: "catalog-provider", source: source, provider: provider, duration: Date().timeIntervalSince(started), result: "failed", detail: "chart=\(chart) code=\((error as NSError).code)")
+            return []
+        }
+    }
+
     func resolve(song: MusicSong, quality: MusicQuality) async throws -> ResolvedMusicResource? {
         let resolver = LXMusicURLResolver(session: session)
         let resolvedURL: URL?

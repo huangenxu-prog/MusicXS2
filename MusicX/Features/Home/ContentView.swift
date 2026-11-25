@@ -1387,7 +1387,10 @@ struct ContentView: View {
 
     @MainActor
     private func loadOfficialCollections(forceRefresh: Bool = false) async {
-        guard !isLoadingOfficialCollections else { return }
+        guard !isLoadingOfficialCollections else {
+            if forceRefresh { MusicSourceDiagnostics.shared.record(event: "home-refresh", source: "home", provider: "recommended-collections", duration: 0, result: "skipped-in-flight") }
+            return
+        }
         isLoadingOfficialCollections = true
         officialCollectionsError = nil
         defer { isLoadingOfficialCollections = false }
@@ -3090,6 +3093,11 @@ struct ContentView: View {
 
     @MainActor
     private func refreshGlobalCatalog() async {
+        let started = Date()
+        MusicSourceDiagnostics.shared.record(event: "home-refresh", source: "home", provider: appearanceMode, duration: 0, result: "start")
+        defer {
+            MusicSourceDiagnostics.shared.record(event: "home-refresh", source: "home", provider: appearanceMode, duration: Date().timeIntervalSince(started), result: Task.isCancelled ? "cancelled" : "finished")
+        }
         await MusicCatalogStore.shared.invalidateHomeContent()
         async let home: Void = loadHomeSongs(forceRefresh: true)
         async let collections: Void = loadOfficialCollections(forceRefresh: true)
@@ -3100,7 +3108,10 @@ struct ContentView: View {
     }
 
     private func loadHomeSongs(forceRefresh: Bool = false) async {
-        guard !isLoadingHomeSongs else { return }
+        guard !isLoadingHomeSongs else {
+            if forceRefresh { MusicSourceDiagnostics.shared.record(event: "home-refresh", source: "home", provider: "new-releases", duration: 0, result: "skipped-in-flight") }
+            return
+        }
         isLoadingHomeSongs = true
         homeLoadError = nil
         defer { isLoadingHomeSongs = false }

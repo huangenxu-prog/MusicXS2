@@ -152,13 +152,27 @@ struct MusicCatalogSearchEngine {
         let key = "catalog-chart-v2|\(chartName)|\(count)"
         let cached: MusicCatalogStore.Snapshot<[MusicSong]>? =
             await MusicCatalogStore.shared.snapshot(for: key)
-        if let cached, !cached.needsRefresh, !forceRefresh { return cached.value }
+        let started = Date()
+        func report(_ result: String, _ detail: String) {
+            MusicSourceDiagnostics.shared.record(event: "catalog-refresh", source: "merged", provider: chartName, duration: Date().timeIntervalSince(started), result: result, detail: detail)
+        }
+        if let cached, !cached.needsRefresh, !forceRefresh {
+            report("cache-hit", "count=\(cached.value.count)")
+            return cached.value
+        }
+        report("request-start", "force=\(forceRefresh) oldCount=\(cached?.value.count ?? 0)")
         do {
             let fresh = try await provider.toplist(chartName, count: count)
-            guard !fresh.isEmpty else { return cached?.value ?? [] }
+            guard !fresh.isEmpty else {
+                report(cached == nil ? "empty" : "cache-fallback", "reason=empty count=\(cached?.value.count ?? 0)")
+                return cached?.value ?? []
+            }
+            let unchanged = cached?.value.map(\.id) == fresh.map(\.id)
+            report(unchanged ? "network-unchanged" : "network-changed", "oldCount=\(cached?.value.count ?? 0) newCount=\(fresh.count)")
             await MusicCatalogStore.shared.save(fresh, for: key, refreshAfter: 2 * 60 * 60)
             return fresh
         } catch {
+            report(cached == nil ? "failed" : "cache-fallback", "reason=error count=\(cached?.value.count ?? 0) code=\((error as NSError).code)")
             if let cached { return cached.value }
             throw error
         }
