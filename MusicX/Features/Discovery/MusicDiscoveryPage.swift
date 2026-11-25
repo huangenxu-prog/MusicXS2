@@ -263,7 +263,6 @@ struct MusicDiscoveryPage: View {
                     .padding(.bottom, 24)
                 }
             }
-            .refreshable { await loadSongs(forceRefresh: true) }
         }
         .preferredColorScheme(.dark)
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -487,7 +486,7 @@ struct MusicDiscoveryPage: View {
 
     @MainActor
     private func loadRecommendationSongs(for tab: RecommendationTab) async {
-        let key = "daily-platform-collection-v3|\(tab == .daily ? "qq" : "netease")"
+        let key = "daily-platform-collection-v4|\(tab == .daily ? "qq" : "netease")|50"
         let snapshot: MusicCatalogStore.Snapshot<[MusicSong]>? =
             await MusicCatalogStore.shared.snapshot(for: key)
         if let snapshot, !snapshot.needsRefresh, !snapshot.value.isEmpty {
@@ -1733,7 +1732,6 @@ struct MusicDiscoveryPage: View {
 
     @MainActor
     private func loadFeaturedPlaylists() async {
-        if !featuredPlaylistResults.isEmpty { return }
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
@@ -2070,11 +2068,6 @@ struct MusicDiscoveryPage: View {
         selectedChartOverride = name
         let requestToken = UUID()
         chartLoadToken = requestToken
-        if let cached = chartSongCache[name], !cached.isEmpty {
-            songs = cached
-            errorMessage = nil
-            return
-        }
         isLoading = true
         errorMessage = nil
         defer {
@@ -2101,11 +2094,6 @@ struct MusicDiscoveryPage: View {
     private func loadChart(_ name: String, showInitialLoading: Bool, forceRefresh: Bool = false) async {
         let requestToken = UUID()
         chartLoadToken = requestToken
-        if let cached = chartSongCache[name], !cached.isEmpty {
-            songs = cached
-            errorMessage = nil
-            return
-        }
         if showInitialLoading { isLoading = true }
         errorMessage = nil
         defer {
