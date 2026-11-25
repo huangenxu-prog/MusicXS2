@@ -380,7 +380,7 @@ struct ContentView: View {
                     savePlaybackSession()
                 } else {
                     scheduleSleepTimer()
-                    Task { await loadHomeSongs() }
+                    Task { await loadHomeSongs(); await loadOfficialCollections() }
                 }
             }
             .onChange(of: sleepTimerDeadline) { _, _ in
@@ -788,7 +788,8 @@ struct ContentView: View {
                 onCollection: openLightPlaylist,
                 onAlbum: { name, artist in discoveryRoute = .album(title: name, artist: artist) },
                 onArtist: openLightArtist,
-                onSettings: { isLightSettingsPresented = true })
+                onSettings: { isLightSettingsPresented = true },
+                onRefresh: { await refreshGlobalCatalog() })
         case .search:
             MXLightSearch(
                 searchText: $searchText, songs: filteredSongs.map(lightSong),
@@ -1003,7 +1004,7 @@ struct ContentView: View {
                 .padding(.bottom, 8)
             }
             .scrollBounceBehavior(.basedOnSize)
-            .refreshable { await loadHomeSongs(forceRefresh: true) }
+            .refreshable { await refreshGlobalCatalog() }
         }
         .background {
             let navy = Color(red: 10/255, green: 14/255, blue: 31/255)
@@ -1387,7 +1388,7 @@ struct ContentView: View {
 
     @MainActor
     private func loadOfficialCollections() async {
-        guard homeOfficialCollections.isEmpty, !isLoadingOfficialCollections else { return }
+        guard !isLoadingOfficialCollections else { return }
         isLoadingOfficialCollections = true
         officialCollectionsError = nil
         defer { isLoadingOfficialCollections = false }
@@ -1397,6 +1398,7 @@ struct ContentView: View {
             // Each provider keeps its own playlist ID; no cross-platform merging.
             let collections = try await PlatformCollectionCatalog().remainingRecommendedCollections()
             guard !Task.isCancelled else { return }
+            guard !collections.isEmpty else { return }
             visibleCollectionCount = 18
             homeOfficialCollections = collections.map { item in
                 MusicPlaylist(
@@ -3087,6 +3089,16 @@ struct ContentView: View {
     }
 
     @MainActor
+    private func refreshGlobalCatalog() async {
+        await MusicCatalogStore.shared.invalidateAll()
+        async let home: Void = loadHomeSongs(forceRefresh: true)
+        async let collections: Void = loadOfficialCollections()
+        async let daily: [MusicSong]? = try? await PlatformCollectionCatalog().firstTwoPlatformRecommendations(count: 50)
+        async let hot: [MusicSong]? = try? await MusicCatalogSearchEngine().toplist("热歌榜", count: 50, forceRefresh: true)
+        async let rising: [MusicSong]? = try? await MusicCatalogSearchEngine().toplist("飙升榜", count: 50, forceRefresh: true)
+        _ = await (home, collections, daily, hot, rising)
+    }
+
     private func loadHomeSongs(forceRefresh: Bool = false) async {
         guard !isLoadingHomeSongs else { return }
         isLoadingHomeSongs = true
@@ -3096,6 +3108,7 @@ struct ContentView: View {
         do {
             let latestTracks = try await MusicCatalogSearchEngine().toplist("新歌榜", count: 50, forceRefresh: forceRefresh)
             guard !Task.isCancelled else { return }
+            guard !latestTracks.isEmpty else { return }
             songs = latestTracks.map { item in
                 AppSong(
                     id: stableSongID(item),
