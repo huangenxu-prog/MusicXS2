@@ -1860,7 +1860,7 @@ struct MusicDiscoveryPage: View {
             case .charts, .chart:
                 result = []
             case .daily:
-                result = try await PlatformCollectionCatalog().firstTwoPlatformRecommendations(count: 50)
+                result = try await PlatformCollectionCatalog().firstTwoPlatformRecommendations(count: 50, forceRefresh: forceRefresh)
             case .newReleases:
                 result = try await catalog.toplist("新歌榜", count: 50, forceRefresh: forceRefresh)
             case .album(let albumTitle, let albumArtist):
@@ -2074,7 +2074,7 @@ struct MusicDiscoveryPage: View {
             if chartLoadToken == requestToken { isLoading = false }
         }
         do {
-            let result = try await catalog.toplist(name, count: 50)
+            let result = try await catalog.toplist(name, count: 50, forceRefresh: forceRefresh)
             guard !Task.isCancelled, chartLoadToken == requestToken else { return }
             if !result.isEmpty {
                 chartSongCache[name] = result
@@ -2100,7 +2100,7 @@ struct MusicDiscoveryPage: View {
             if showInitialLoading, chartLoadToken == requestToken { isLoading = false }
         }
         do {
-            let result = try await catalog.toplist(name, count: 50)
+            let result = try await catalog.toplist(name, count: 50, forceRefresh: forceRefresh)
             guard !Task.isCancelled, chartLoadToken == requestToken else { return }
             if !result.isEmpty { chartSongCache[name] = result }
             songs = result

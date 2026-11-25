@@ -247,9 +247,14 @@ struct MusicXLegacySupplierLibrary: MusicResourceProvider, MusicCatalogSearchPro
 
     func toplist(_ chartName: String, count: Int) async throws -> [MusicSong] {
         let limit = min(max(count, 1), 100)
-        async let netease: [MusicSong]? = try? await NetEaseNativeAPIClient(session: session)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.urlCache = nil
+        let catalogSession = URLSession(configuration: configuration)
+        defer { catalogSession.finishTasksAndInvalidate() }
+        async let netease: [MusicSong]? = try? await NetEaseNativeAPIClient(session: catalogSession)
             .toplist(chartName, count: limit)
-        async let qq: [MusicSong]? = try? await GDStudioMusicSearchService(session: session)
+        async let qq: [MusicSong]? = try? await GDStudioMusicSearchService(session: catalogSession)
             .toplist(chartName, count: limit)
         let groups = [await netease ?? [], await qq ?? []]
         try Task.checkCancellation()

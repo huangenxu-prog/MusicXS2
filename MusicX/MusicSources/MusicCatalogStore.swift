@@ -29,7 +29,7 @@ actor MusicCatalogStore {
     }
 
     private init() {
-        invalidatedAt = UserDefaults.standard.object(forKey: "MusicXCatalog.invalidatedAt") as? Date ?? .distantPast
+        invalidatedAt = UserDefaults.standard.object(forKey: "MusicXCatalog.homeInvalidatedAt") as? Date ?? .distantPast
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         directory = support.appendingPathComponent("MusicXCatalog", isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

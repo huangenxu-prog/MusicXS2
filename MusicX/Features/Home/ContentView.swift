@@ -1387,7 +1387,7 @@ struct ContentView: View {
     }
 
     @MainActor
-    private func loadOfficialCollections() async {
+    private func loadOfficialCollections(forceRefresh: Bool = false) async {
         guard !isLoadingOfficialCollections else { return }
         isLoadingOfficialCollections = true
         officialCollectionsError = nil
@@ -1396,7 +1396,7 @@ struct ContentView: View {
         do {
             // Fetch every collection returned by both recommendation endpoints.
             // Each provider keeps its own playlist ID; no cross-platform merging.
-            let collections = try await PlatformCollectionCatalog().remainingRecommendedCollections()
+            let collections = try await PlatformCollectionCatalog().remainingRecommendedCollections(forceRefresh: forceRefresh)
             guard !Task.isCancelled else { return }
             guard !collections.isEmpty else { return }
             visibleCollectionCount = 18
@@ -3093,8 +3093,8 @@ struct ContentView: View {
     private func refreshGlobalCatalog() async {
         await MusicCatalogStore.shared.invalidateHomeContent()
         async let home: Void = loadHomeSongs(forceRefresh: true)
-        async let collections: Void = loadOfficialCollections()
-        async let daily: [MusicSong]? = try? await PlatformCollectionCatalog().firstTwoPlatformRecommendations(count: 50)
+        async let collections: Void = loadOfficialCollections(forceRefresh: true)
+        async let daily: [MusicSong]? = try? await PlatformCollectionCatalog().firstTwoPlatformRecommendations(count: 50, forceRefresh: true)
         async let hot: [MusicSong]? = try? await MusicCatalogSearchEngine().toplist("热歌榜", count: 50, forceRefresh: true)
         async let rising: [MusicSong]? = try? await MusicCatalogSearchEngine().toplist("飙升榜", count: 50, forceRefresh: true)
         _ = await (home, collections, daily, hot, rising)

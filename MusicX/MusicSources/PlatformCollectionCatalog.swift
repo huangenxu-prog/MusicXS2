@@ -28,10 +28,10 @@ struct PlatformCollectionCatalog {
     }
 
     /// Keep platform catalogs independent, including same-name collections.
-    func remainingRecommendedCollections() async throws -> [PlatformCollection] {
+    func remainingRecommendedCollections(forceRefresh: Bool = false) async throws -> [PlatformCollection] {
         let key = "home-collections-v4"
         let cached: MusicCatalogStore.Snapshot<[PlatformCollection]>? = await MusicCatalogStore.shared.snapshot(for: key)
-        if let cached, !cached.needsRefresh { return cached.value }
+        if let cached, !cached.needsRefresh, !forceRefresh { return cached.value }
         do {
             async let qq = qqRecommendations()
             async let netease = neteaseRecommendations()
@@ -128,11 +128,11 @@ struct PlatformCollectionCatalog {
     }
 
     /// Only the first collection is used; do not fill from later playlists.
-    func firstCollectionSongs(provider: PlatformCollection.Provider, count: Int = 50) async throws -> [MusicSong] {
+    func firstCollectionSongs(provider: PlatformCollection.Provider, count: Int = 50, forceRefresh: Bool = false) async throws -> [MusicSong] {
         guard count > 0 else { return [] }
         let key = "daily-platform-collection-v4|\(provider.rawValue)|\(count)"
         let cached: MusicCatalogStore.Snapshot<[MusicSong]>? = await MusicCatalogStore.shared.snapshot(for: key)
-        if let cached, !cached.needsRefresh { return cached.value }
+        if let cached, !cached.needsRefresh, !forceRefresh { return cached.value }
         do {
             let collections = try await (provider == .qq ? qqRecommendations() : neteaseRecommendations())
             guard let first = collections.first else {
@@ -140,7 +140,7 @@ struct PlatformCollectionCatalog {
             }
             let fresh = try await tracks(for: first, count: count)
             if !fresh.isEmpty {
-                await MusicCatalogStore.shared.save(fresh, for: key, refreshAfter: 24 * 60 * 60)
+                await MusicCatalogStore.shared.save(fresh, for: key, refreshAfter: 2 * 60 * 60)
                 return fresh
             }
             return cached?.value ?? []
@@ -151,10 +151,10 @@ struct PlatformCollectionCatalog {
     }
 
     /// Merge the first QQ and the first NetEase playlist, at most 50 unique songs.
-    func firstTwoPlatformRecommendations(count: Int = 50) async throws -> [MusicSong] {
+    func firstTwoPlatformRecommendations(count: Int = 50, forceRefresh: Bool = false) async throws -> [MusicSong] {
         guard count > 0 else { return [] }
-        async let qqRows: [MusicSong] = (try? await firstCollectionSongs(provider: .qq, count: count)) ?? []
-        async let neteaseRows: [MusicSong] = (try? await firstCollectionSongs(provider: .netease, count: count)) ?? []
+        async let qqRows: [MusicSong] = (try? await firstCollectionSongs(provider: .qq, count: count, forceRefresh: forceRefresh)) ?? []
+        async let neteaseRows: [MusicSong] = (try? await firstCollectionSongs(provider: .netease, count: count, forceRefresh: forceRefresh)) ?? []
         let (qq, netease) = await (qqRows, neteaseRows)
         var combined: [MusicSong] = []
         var seen = Set<String>()
@@ -388,6 +388,8 @@ struct PlatformCollectionCatalog {
     }
 
     private func json(for request: URLRequest) async throws -> [String: Any] {
+        var request = request
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse,
               (200..<300).contains(http.statusCode) else {
