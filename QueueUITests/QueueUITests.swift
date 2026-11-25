@@ -24,11 +24,31 @@ final class QueueUITests: XCTestCase {
         app.buttons[favorites ? "收藏歌曲" : "最近播放"].tap()
         XCTAssertTrue(app.staticTexts["27 首"].waitForExistence(timeout: 8))
         let row = app.buttons["library-title-7"]
-        for _ in 0..<5 where !row.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        let mini = app.buttons["mini-open-player"]
+        XCTAssertTrue(row.waitForExistence(timeout: 8))
+        // The eighth row may be covered by the floating mini player even
+        // when XCTest reports it as hittable. Scroll it above that overlay.
+        for _ in 0..<5 {
+            if row.isHittable && row.frame.maxY < mini.frame.minY - 12 { break }
+            app.scrollViews.firstMatch.swipeUp()
+        }
+        guard row.isHittable && row.frame.maxY < mini.frame.minY - 12 else {
+            XCTFail("Selected track is not safely above the mini player: \(app.debugDescription)")
+            return
+        }
         row.tap()
-        app.buttons["mini-open-player"].tap()
+        let selected = NSPredicate(format: "label CONTAINS %@", "FixtureTrack-8")
+        let ready = XCTNSPredicateExpectation(predicate: selected, object: mini)
+        guard XCTWaiter.wait(for: [ready], timeout: 10) == .completed else {
+            XCTFail("Mini player did not select FixtureTrack-8: \(app.debugDescription)")
+            return
+        }
+        mini.tap()
         let queueButton = app.buttons["player-open-queue"]
-        XCTAssertTrue(queueButton.waitForExistence(timeout: 10), app.debugDescription)
+        guard queueButton.waitForExistence(timeout: 10) else {
+            XCTFail("Player queue control not found: \(app.debugDescription)")
+            return
+        }
         queueButton.tap()
         // Recent Plays and Favorites must both build the full 27-song queue.
         // The previous test incorrectly locked in an empty Recent queue.
