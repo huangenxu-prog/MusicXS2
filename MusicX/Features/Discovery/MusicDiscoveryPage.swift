@@ -486,12 +486,17 @@ struct MusicDiscoveryPage: View {
 
     @MainActor
     private func loadRecommendationSongs(for tab: RecommendationTab) async {
-        if let cached = recommendationSongCache[tab], !cached.isEmpty {
-            songs = cached
+        let key = "daily-platform-collection-v3|\(tab == .daily ? "qq" : "netease")"
+        let snapshot: MusicCatalogStore.Snapshot<[MusicSong]>? =
+            await MusicCatalogStore.shared.snapshot(for: key)
+        if let snapshot, !snapshot.needsRefresh, !snapshot.value.isEmpty {
+            recommendationSongCache[tab] = snapshot.value
+            songs = snapshot.value
             errorMessage = nil
             isLoading = false
             return
         }
+        if let snapshot, !snapshot.value.isEmpty { songs = snapshot.value }
         let requestToken = UUID()
         songsLoadToken = requestToken
         isLoading = songs.isEmpty
@@ -509,16 +514,26 @@ struct MusicDiscoveryPage: View {
                 result = try await PlatformCollectionCatalog().firstCollectionSongs(provider: .netease, count: 50)
             }
             guard !Task.isCancelled, songsLoadToken == requestToken else { return }
-            recommendationSongCache[tab] = result
-            songs = result
+            if !result.isEmpty {
+                await MusicCatalogStore.shared.save(result, for: key, refreshAfter: 24 * 60 * 60)
+                recommendationSongCache[tab] = result
+                songs = result
+            } else if let snapshot {
+                songs = snapshot.value
+            }
             if result.isEmpty {
                 errorMessage = tab == .daily ? "每日推荐暂时没有可用歌曲" : "精选歌曲暂时没有可用歌曲"
             }
         } catch {
             guard !Task.isCancelled, songsLoadToken == requestToken else { return }
-            errorMessage = tab == .daily
-                ? "每日推荐暂时无法加载：\(error.localizedDescription)"
-                : "精选歌曲暂时无法加载：\(error.localizedDescription)"
+            if let snapshot, !snapshot.value.isEmpty {
+                songs = snapshot.value
+                errorMessage = nil
+            } else {
+                errorMessage = tab == .daily
+                    ? "每日推荐暂时无法加载：\(error.localizedDescription)"
+                    : "精选歌曲暂时无法加载：\(error.localizedDescription)"
+            }
         }
     }
 
