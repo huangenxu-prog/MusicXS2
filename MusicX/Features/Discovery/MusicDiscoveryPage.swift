@@ -2074,7 +2074,7 @@ struct MusicDiscoveryPage: View {
             if chartLoadToken == requestToken { isLoading = false }
         }
         do {
-            let result = try await catalog.toplist(name, count: 50, forceRefresh: forceRefresh)
+            let result = try await catalog.toplist(name, count: 50)
             guard !Task.isCancelled, chartLoadToken == requestToken else { return }
             if !result.isEmpty {
                 chartSongCache[name] = result
