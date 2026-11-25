@@ -1954,6 +1954,11 @@ struct MusicDiscoveryPage: View {
 
 
     private func searchAlbumTracks(title: String, artist: String) async -> [MusicSong] {
+        let cacheKey = "album-songs-v3|\(title)|\(artist)"
+        let snapshot: MusicCatalogStore.Snapshot<[MusicSong]>? =
+            await MusicCatalogStore.shared.snapshot(for: cacheKey)
+        if let snapshot, !snapshot.needsRefresh, !snapshot.value.isEmpty { return snapshot.value }
+
         func normalize(_ value: String) -> String {
             value.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
                 .filter { $0.isLetter || $0.isNumber }
@@ -2049,7 +2054,12 @@ struct MusicDiscoveryPage: View {
             let key = "\(titleKey)|\(artistKey)|\(versionMarkers(song))|\(durationKey)"
             return seenRecordings.insert(key).inserted ? song : nil
         }
-        return Array(unique.prefix(50))
+        let fresh = Array(unique.prefix(50))
+        if !fresh.isEmpty {
+            await MusicCatalogStore.shared.save(fresh, for: cacheKey, refreshAfter: 24 * 60 * 60)
+            return fresh
+        }
+        return snapshot?.value ?? []
     }
 
     @MainActor
