@@ -3090,7 +3090,7 @@ struct ContentView: View {
 
     @MainActor
     private func refreshGlobalCatalog() async {
-        await MusicCatalogStore.shared.invalidateAll()
+        await MusicCatalogStore.shared.invalidateHomeContent()
         async let home: Void = loadHomeSongs(forceRefresh: true)
         async let collections: Void = loadOfficialCollections()
         async let daily: [MusicSong]? = try? await PlatformCollectionCatalog().firstTwoPlatformRecommendations(count: 50)
