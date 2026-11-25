@@ -136,6 +136,7 @@ struct MXReferenceDetail: View {
                 .padding(.top, 18)
                 .padding(.bottom, 28)
             }
+            .refreshable { await load(forceRefresh: true) }
         }
         .background(MXLight.background.ignoresSafeArea())
         .preferredColorScheme(.light)
@@ -448,14 +449,14 @@ struct MXReferenceDetail: View {
     @MainActor private func loadChart(_ name: String) async {
         isLoading = true
         defer { isLoading = false }
-        tracks = (try? await MusicCatalogSearchEngine().toplist(name, count: 50)) ?? []
+        let updated = (try? await MusicCatalogSearchEngine().toplist(name, count: 50)) ?? []
+        if !updated.isEmpty { tracks = updated }
     }
 
-    @MainActor private func load() async {
+    @MainActor private func load(forceRefresh: Bool = false) async {
         isLoading = true
         errorText = nil
-        tracks = []
-        playlists = []
+        if !forceRefresh { tracks = []; playlists = [] }
         defer { isLoading = false }
         let catalog = MusicCatalogSearchEngine()
         do {
@@ -466,19 +467,19 @@ struct MXReferenceDetail: View {
             case .featuredPick:
                 tracks = favorites
             case .charts:
-                tracks = try await catalog.toplist(chart, count: 50)
+                tracks = try await catalog.toplist(chart, count: 50, forceRefresh: forceRefresh)
             case .chart(let name):
                 chart = name
-                tracks = try await catalog.toplist(name, count: 50)
+                tracks = try await catalog.toplist(name, count: 50, forceRefresh: forceRefresh)
             case .newReleases:
-                tracks = try await catalog.toplist("新歌榜", count: 50)
+                tracks = try await catalog.toplist("新歌榜", count: 50, forceRefresh: forceRefresh)
             case .featuredPlaylists, .playlists:
-                playlists = try await catalog.featuredPlaylists(count: 30)
+                playlists = try await catalog.featuredPlaylists(count: 30, forceRefresh: forceRefresh)
             case .playlistByID(let playlist):
                 tracks = try await catalog.playlistTracks(
-                    playlistID: playlist.sourceID, source: playlist.source, count: 100)
+                    playlistID: playlist.sourceID, source: playlist.source, count: 100, forceRefresh: forceRefresh)
             case .playlist(let name):
-                tracks = try await catalog.playlistTracks(keyword: name, count: 50)
+                tracks = try await catalog.playlistTracks(keyword: name, count: 50, forceRefresh: forceRefresh)
             case .album(let title, let artist):
                 let netease = (try? await catalog.search(
                     keyword: title, source: .netease, count: 50, albumOnly: true)) ?? []
@@ -512,7 +513,7 @@ struct MXReferenceDetail: View {
                 errorText = "暂无可展示内容，请稍后重试"
             }
         } catch {
-            errorText = "加载失败：\(error.localizedDescription)"
+            if tracks.isEmpty && playlists.isEmpty { errorText = "加载失败：\(error.localizedDescription)" }
         }
     }
 }
