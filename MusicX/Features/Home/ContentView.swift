@@ -2319,6 +2319,7 @@ struct ContentView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .accessibilityLabel(mode.title)
+                                .accessibilityIdentifier(mode == .queue ? "player-open-queue" : mode.title)
                                 .accessibilityAddTraits(playerDisplayMode == mode ? .isSelected : [])
                             }
                         }
