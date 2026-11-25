@@ -238,6 +238,7 @@ struct MXLightHome: View {
     let onAlbum: (String, String) -> Void
     let onArtist: (String) -> Void
     let onSettings: () -> Void
+    var onRefresh: () async -> Void = {}
 
     private var albums: [MXLightTrack] {
         var seen = Set<String>()
@@ -434,6 +435,7 @@ struct MXLightHome: View {
             .padding(.top, 14)
             .padding(.bottom, 24)
         }
+        .refreshable { await onRefresh() }
         .background(MXLight.background)
     }
 
