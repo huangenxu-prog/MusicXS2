@@ -90,8 +90,19 @@ struct MusicCatalogSearchEngine {
         try await provider.searchPlaylists(keyword: keyword, count: count)
     }
 
-    func featuredPlaylists(count: Int = 30) async throws -> [MusicPlaylist] {
-        try await provider.featuredPlaylists(count: count)
+    func featuredPlaylists(count: Int = 30, forceRefresh: Bool = false) async throws -> [MusicPlaylist] {
+        let key = "catalog-featured-v2|\(count)"
+        let cached: MusicCatalogStore.Snapshot<[MusicPlaylist]>? = await MusicCatalogStore.shared.snapshot(for: key)
+        if let cached, !cached.needsRefresh, !forceRefresh { return cached.value }
+        do {
+            let fresh = try await provider.featuredPlaylists(count: count)
+            guard !fresh.isEmpty else { return cached?.value ?? [] }
+            await MusicCatalogStore.shared.save(fresh, for: key, refreshAfter: 12 * 60 * 60)
+            return fresh
+        } catch {
+            if let cached { return cached.value }
+            throw error
+        }
     }
 
     func dailyRecommendedSongs(count: Int = 30) async throws -> [MusicSong] {
@@ -110,8 +121,19 @@ struct MusicCatalogSearchEngine {
         try await provider.playlistTracks(playlistID: playlistID, count: count)
     }
 
-    func playlistTracks(playlistID: String, source: MusicSource, count: Int = 50) async throws -> [MusicSong] {
-        try await provider.playlistTracks(playlistID: playlistID, source: source, count: count)
+    func playlistTracks(playlistID: String, source: MusicSource, count: Int = 50, forceRefresh: Bool = false) async throws -> [MusicSong] {
+        let key = "catalog-playlist-tracks-v2|\(source.rawValue)|\(playlistID)|\(count)"
+        let cached: MusicCatalogStore.Snapshot<[MusicSong]>? = await MusicCatalogStore.shared.snapshot(for: key)
+        if let cached, !cached.needsRefresh, !forceRefresh { return cached.value }
+        do {
+            let fresh = try await provider.playlistTracks(playlistID: playlistID, source: source, count: count)
+            guard !fresh.isEmpty else { return cached?.value ?? [] }
+            await MusicCatalogStore.shared.save(fresh, for: key, refreshAfter: 6 * 60 * 60)
+            return fresh
+        } catch {
+            if let cached { return cached.value }
+            throw error
+        }
     }
 
     // Rankings refresh every two hours. A failed refresh keeps the last valid snapshot.
