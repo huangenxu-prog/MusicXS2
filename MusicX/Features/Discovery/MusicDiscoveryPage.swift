@@ -263,6 +263,7 @@ struct MusicDiscoveryPage: View {
                     .padding(.bottom, 24)
                 }
             }
+            .refreshable { await loadSongs(forceRefresh: true) }
         }
         .preferredColorScheme(.dark)
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -1831,7 +1832,7 @@ struct MusicDiscoveryPage: View {
     }
 
     @MainActor
-    private func loadSongs() async {
+    private func loadSongs(forceRefresh: Bool = false) async {
         let requestToken = UUID()
         songsLoadToken = requestToken
         if isRecommendationRoute {
@@ -1849,7 +1850,7 @@ struct MusicDiscoveryPage: View {
             return
         }
         if case .albums = route { songs = []; return }
-        if isChartRoute { await loadChart(selectedChart, showInitialLoading: true); return }
+        if isChartRoute { await loadChart(selectedChart, showInitialLoading: true, forceRefresh: forceRefresh); return }
         isLoading = true
         errorMessage = nil
         defer {
@@ -1863,7 +1864,7 @@ struct MusicDiscoveryPage: View {
             case .daily:
                 result = try await PlatformCollectionCatalog().firstTwoPlatformRecommendations(count: 50)
             case .newReleases:
-                result = try await catalog.toplist("新歌榜", count: 50)
+                result = try await catalog.toplist("新歌榜", count: 50, forceRefresh: forceRefresh)
             case .album(let albumTitle, let albumArtist):
                 result = await searchAlbumTracks(title: albumTitle, artist: albumArtist)
             case .musicCategory(_, _, _, let keyword):
@@ -1881,7 +1882,7 @@ struct MusicDiscoveryPage: View {
             case .featuredPick:
                 result = favoriteTracks
             case .playlist(let name):
-                result = try await catalog.playlistTracks(keyword: name, count: 50)
+                result = try await catalog.playlistTracks(keyword: name, count: 50, forceRefresh: forceRefresh)
             case .playlistByID(let playlist):
                 if let imported = importedPlaylists.first(where: { $0.id == playlist.id }) {
                     result = imported.songs
@@ -1891,7 +1892,8 @@ struct MusicDiscoveryPage: View {
                     result = try await catalog.playlistTracks(
                         playlistID: playlist.sourceID,
                         source: playlist.source,
-                        count: 50
+                        count: 50,
+                        forceRefresh: forceRefresh
                     )
                 } catch {
                     if Task.isCancelled { return }
@@ -2068,7 +2070,7 @@ struct MusicDiscoveryPage: View {
         selectedChartOverride = name
         let requestToken = UUID()
         chartLoadToken = requestToken
-        if let cached = chartSongCache[name], !cached.isEmpty {
+        if !forceRefresh, let cached = chartSongCache[name], !cached.isEmpty {
             songs = cached
             errorMessage = nil
             return
@@ -2079,7 +2081,7 @@ struct MusicDiscoveryPage: View {
             if chartLoadToken == requestToken { isLoading = false }
         }
         do {
-            let result = try await catalog.toplist(name, count: 50)
+            let result = try await catalog.toplist(name, count: 50, forceRefresh: forceRefresh)
             guard !Task.isCancelled, chartLoadToken == requestToken else { return }
             if !result.isEmpty {
                 chartSongCache[name] = result
@@ -2096,7 +2098,7 @@ struct MusicDiscoveryPage: View {
     }
 
     @MainActor
-    private func loadChart(_ name: String, showInitialLoading: Bool) async {
+    private func loadChart(_ name: String, showInitialLoading: Bool, forceRefresh: Bool = false) async {
         let requestToken = UUID()
         chartLoadToken = requestToken
         if let cached = chartSongCache[name], !cached.isEmpty {
