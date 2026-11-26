@@ -253,10 +253,15 @@ struct MusicXLegacySupplierLibrary: MusicResourceProvider, MusicCatalogSearchPro
         let catalogSession = URLSession(configuration: configuration)
         defer { catalogSession.finishTasksAndInvalidate() }
         async let netease = diagnosedChart(source: "netease", provider: "native", chart: chartName) {
-            try await NetEaseNativeAPIClient(session: catalogSession).toplist(chartName, count: limit)
+            do {
+                return try await NetEaseNativeAPIClient(session: catalogSession).toplist(chartName, count: limit)
+            } catch {
+                try Task.checkCancellation()
+                return try await GDStudioMusicSearchService(session: catalogSession).toplist(chartName, count: limit)
+            }
         }
-        async let qq = diagnosedChart(source: "qq", provider: "gdstudio", chart: chartName) {
-            try await GDStudioMusicSearchService(session: catalogSession).toplist(chartName, count: limit)
+        async let qq = diagnosedChart(source: "qq", provider: "native", chart: chartName) {
+            try await PlatformCollectionCatalog(session: catalogSession).qqToplist(chartName, count: limit)
         }
         let groups = [await netease, await qq]
         try Task.checkCancellation()
@@ -266,10 +271,19 @@ struct MusicXLegacySupplierLibrary: MusicResourceProvider, MusicCatalogSearchPro
                 .filter { $0.isLetter || $0.isNumber }
         }
         var seen = Set<String>()
-        let merged = groups.flatMap { $0 }.filter { song in
-            let identity = normalized(song.title) + "|" + normalized(song.artist)
-            return !identity.isEmpty && seen.insert(identity).inserted
+        var merged: [MusicSong] = []
+        let maxCount = groups.map { $0.count }.max() ?? 0
+        for index in 0..<maxCount {
+            for group in groups where group.indices.contains(index) {
+                let song = group[index]
+                let title = normalized(song.title)
+                let identity = title + "|" + normalized(song.artist)
+                if !title.isEmpty && seen.insert(identity).inserted {
+                    merged.append(song)
+                }
+            }
         }
+        MusicSourceDiagnostics.shared.record(event: "chart-merge", source: "merged", provider: "interleave", duration: 0, result: "success", detail: "chart=\(chartName) netease=\(groups[0].count) qq=\(groups[1].count) output=\(min(limit, merged.count))")
         guard !merged.isEmpty else {
             throw MusicSourceError.invalidResponse("榜单暂时无法加载，请稍后重试")
         }

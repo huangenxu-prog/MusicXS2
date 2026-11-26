@@ -749,12 +749,6 @@ struct GDStudioMusicSearchService {
     func toplist(_ chartName: String, count: Int = 50) async throws -> [MusicSong] {
         let normalizedChart = ["热歌榜", "新歌榜", "飙升榜"].contains(chartName) ? chartName : "热歌榜"
         let cacheKey = "catalog-chart|\(normalizedChart)|\(count)"
-        if let cached = await MusicCatalogStore.shared.snapshot(for: cacheKey, as: [MusicSong].self) {
-            if cached.needsRefresh {
-                return (try? await refreshToplist(normalizedChart, count: count, cacheKey: cacheKey)) ?? cached.value
-            }
-            return cached.value
-        }
         return try await refreshToplist(normalizedChart, count: count, cacheKey: cacheKey)
     }
 
@@ -811,7 +805,7 @@ struct GDStudioMusicSearchService {
                     lastError = MusicSourceError.invalidResponse("网易云榜单没有可用歌曲")
                     continue
                 }
-                let refreshInterval: TimeInterval = chartName == "热歌榜" ? 3 * 24 * 60 * 60 : 24 * 60 * 60
+                let refreshInterval: TimeInterval = 2 * 60 * 60
                 await MusicCatalogStore.shared.save(songs, for: cacheKey, refreshAfter: refreshInterval)
                 return songs
             } catch {

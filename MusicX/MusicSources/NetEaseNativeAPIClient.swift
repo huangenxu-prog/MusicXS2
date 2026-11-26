@@ -466,12 +466,6 @@ struct NetEaseNativeAPIClient {
         let normalizedChart = ["热歌榜", "新歌榜", "飙升榜"].contains(chartName) ? chartName : "热歌榜"
         let limit = min(max(count, 1), 100)
         let cacheKey = "netease-native-chart|\(normalizedChart)|\(limit)"
-        if let cached = await MusicCatalogStore.shared.snapshot(for: cacheKey, as: [MusicSong].self) {
-            if cached.needsRefresh {
-                return (try? await refreshToplist(normalizedChart, count: limit, cacheKey: cacheKey)) ?? cached.value
-            }
-            return cached.value
-        }
         return try await refreshToplist(normalizedChart, count: limit, cacheKey: cacheKey)
     }
 
@@ -534,7 +528,7 @@ struct NetEaseNativeAPIClient {
         guard !songs.isEmpty else {
             throw MusicSourceError.invalidResponse("网易云榜单没有可用歌曲")
         }
-        let refreshInterval: TimeInterval = chartName == "热歌榜" ? 3 * 24 * 60 * 60 : 24 * 60 * 60
+        let refreshInterval: TimeInterval = 2 * 60 * 60
         await MusicCatalogStore.shared.save(songs, for: cacheKey, refreshAfter: refreshInterval)
         return songs
     }

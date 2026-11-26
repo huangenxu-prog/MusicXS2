@@ -427,6 +427,62 @@ struct PlatformCollectionCatalog {
         }
     }
 
+    /// QQ's own public chart, distinct from the NetEase fallback endpoint.
+    func qqToplist(_ chartName: String, count: Int = 50) async throws -> [MusicSong] {
+        let topID: Int
+        switch chartName {
+        case "新歌榜": topID = 27
+        case "飙升榜": topID = 62
+        default: topID = 26
+        }
+        let limit = min(max(count, 1), 100)
+        let body: [String: Any] = [
+            "detail": ["module": "musicToplist.ToplistInfoServer",
+                       "method": "GetDetail",
+                       "param": ["topId": topID, "offset": 0, "num": limit]],
+            "comm": ["ct": 24, "cv": 0, "uin": "0", "format": "json"]
+        ]
+        let payload = try JSONSerialization.data(withJSONObject: body)
+        var components = URLComponents(string: "https://u.y.qq.com/cgi-bin/musicu.fcg")!
+        components.queryItems = [URLQueryItem(name: "format", value: "json"),
+                                 URLQueryItem(name: "data", value: String(decoding: payload, as: UTF8.self))]
+        guard let url = components.url else {
+            throw MusicSourceError.invalidResponse("QQ 榜单地址无效")
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 12
+        request.setValue("https://y.qq.com/", forHTTPHeaderField: "Referer")
+        request.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+        let root = try await json(for: request)
+        let envelope = root["detail"] as? [String: Any] ?? [:]
+        guard (root["code"] as? Int ?? -1) == 0,
+              (envelope["code"] as? Int ?? -1) == 0,
+              let data = envelope["data"] as? [String: Any],
+              let rows = data["songInfoList"] as? [[String: Any]] else {
+            throw MusicSourceError.invalidResponse("QQ 榜单响应格式异常")
+        }
+        var seen = Set<String>()
+        let songs = rows.compactMap { row -> MusicSong? in
+            guard let mid = row["mid"] as? String, !mid.isEmpty,
+                  let title = (row["name"] as? String) ?? (row["title"] as? String),
+                  !title.isEmpty, seen.insert(mid).inserted else { return nil }
+            let artists = (row["singer"] as? [[String: Any]] ?? [])
+                .compactMap { $0["name"] as? String }.joined(separator: " / ")
+            let album = row["album"] as? [String: Any] ?? [:]
+            let albumMID = album["mid"] as? String
+            return MusicSong(source: .qq, sourceID: mid, title: title,
+                artist: artists.isEmpty ? "未知歌手" : artists,
+                album: album["name"] as? String,
+                artworkURL: albumMID.flatMap { URL(string: "https://y.gtimg.cn/music/photo_new/T002R300x300M000\($0).jpg") },
+                duration: (row["interval"] as? NSNumber)?.doubleValue,
+                hash: nil, albumID: albumMID, pictureID: albumMID, lyricID: mid)
+        }
+        guard !songs.isEmpty else { throw MusicSourceError.invalidResponse("QQ 榜单没有可用歌曲") }
+        let metadata = data["data"] as? [String: Any] ?? [:]
+        MusicSourceDiagnostics.shared.record(event: "chart-upstream", source: "qq", provider: "native", duration: 0, result: "success", detail: "id=\(topID) period=\(metadata["period"] ?? "") count=\(songs.count)")
+        return Array(songs.prefix(limit))
+    }
+
     private func json(for request: URLRequest) async throws -> [String: Any] {
         var request = request
         request.cachePolicy = .reloadIgnoringLocalCacheData

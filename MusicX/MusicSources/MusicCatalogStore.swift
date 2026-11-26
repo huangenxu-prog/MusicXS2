@@ -48,6 +48,8 @@ actor MusicCatalogStore {
         // Only discovery feeds are affected by a manual home refresh.
         // Individual playlists, albums and other snapshots keep their original TTL.
         let homeFeed = key.hasPrefix("catalog-chart-")
+            || key.hasPrefix("netease-native-chart|")
+            || key.hasPrefix("catalog-chart|")
             || key.hasPrefix("catalog-featured-")
             || key.hasPrefix("home-collections-")
             || key.hasPrefix("daily-platform-collection-")
