@@ -161,3 +161,37 @@ enum MusicSourceError: LocalizedError {
 protocol MusicURLResolving {
     func resolve(song: MusicSong, quality: MusicQuality) async throws -> URL
 }
+
+
+// Deterministic chart fusion: preserve each provider's rank, skip duplicates,
+// and alternate accepted songs rather than alternating rejected candidates.
+enum MusicChartFusion {
+    static func merge(netease: [MusicSong], qq: [MusicSong], limit: Int) -> [MusicSong] {
+        guard limit > 0 else { return [] }
+        let groups = [netease.filter { $0.source == .netease }, qq.filter { $0.source == .qq }]
+        var positions = [0, 0]
+        var output: [MusicSong] = []
+        var seen = Set<String>()
+        func normalize(_ value: String) -> String {
+            value.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+                .filter { $0.isLetter || $0.isNumber }
+        }
+        while output.count < limit {
+            var added = false
+            for provider in groups.indices {
+                while positions[provider] < groups[provider].count {
+                    let song = groups[provider][positions[provider]]
+                    positions[provider] += 1
+                    let title = normalize(song.title)
+                    guard !title.isEmpty, seen.insert(title + "|" + normalize(song.artist)).inserted else { continue }
+                    output.append(song)
+                    added = true
+                    break
+                }
+                if output.count == limit { break }
+            }
+            if !added { break }
+        }
+        return output
+    }
+}

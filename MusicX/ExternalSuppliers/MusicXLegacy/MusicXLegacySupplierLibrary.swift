@@ -141,14 +141,7 @@ struct MusicXLegacySupplierLibrary: MusicResourceProvider, MusicCatalogSearchPro
             let detail = failures.isEmpty ? "" : "（" + failures.joined(separator: "；") + "）"
             throw MusicSourceError.invalidResponse("每日推荐暂时无法加载" + detail)
         }
-        let output = Array(merged.prefix(limit))
-        let qqCount = output.filter { $0.source == .qq }.count
-        let wyCount = output.filter { $0.source == .netease }.count
-        MusicSourceDiagnostics.shared.record(event: "chart-output", source: "merged", provider: chartName, duration: 0, result: "success", detail: "qq=\(qqCount) netease=\(wyCount)")
-        for (index, song) in output.prefix(10).enumerated() {
-            MusicSourceDiagnostics.shared.record(event: "chart-output-track", source: song.source.rawValue, provider: chartName, duration: 0, result: "success", detail: "rank=\(index + 1) title=\(song.title) artist=\(song.artist)")
-        }
-        return output
+        return Array(merged.prefix(limit))
     }
     private static func captureDailySource(
         operation: @escaping @Sendable () async throws -> [MusicSong]
@@ -273,28 +266,18 @@ struct MusicXLegacySupplierLibrary: MusicResourceProvider, MusicCatalogSearchPro
         let groups = [await netease, await qq]
         try Task.checkCancellation()
 
-        func normalized(_ value: String) -> String {
-            value.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-                .filter { $0.isLetter || $0.isNumber }
-        }
-        var seen = Set<String>()
-        var merged: [MusicSong] = []
-        let maxCount = groups.map { $0.count }.max() ?? 0
-        for index in 0..<maxCount {
-            for group in groups where group.indices.contains(index) {
-                let song = group[index]
-                let title = normalized(song.title)
-                let identity = title + "|" + normalized(song.artist)
-                if !title.isEmpty && seen.insert(identity).inserted {
-                    merged.append(song)
-                }
-            }
-        }
-        MusicSourceDiagnostics.shared.record(event: "chart-merge", source: "merged", provider: "interleave", duration: 0, result: "success", detail: "chart=\(chartName) netease=\(groups[0].count) qq=\(groups[1].count) output=\(min(limit, merged.count))")
-        guard !merged.isEmpty else {
+        let output = MusicChartFusion.merge(netease: groups[0], qq: groups[1], limit: limit)
+        guard !output.isEmpty else {
             throw MusicSourceError.invalidResponse("榜单暂时无法加载，请稍后重试")
         }
-        return Array(merged.prefix(limit))
+        MusicSourceDiagnostics.shared.record(event: "chart-merge", source: "merged", provider: "interleave", duration: 0, result: "success", detail: "chart=\(chartName) netease=\(groups[0].count) qq=\(groups[1].count) output=\(output.count)")
+        let qqCount = output.filter { $0.source == .qq }.count
+        let wyCount = output.filter { $0.source == .netease }.count
+        MusicSourceDiagnostics.shared.record(event: "chart-output", source: "merged", provider: chartName, duration: 0, result: "success", detail: "qq=\(qqCount) netease=\(wyCount)")
+        for (index, song) in output.prefix(10).enumerated() {
+            MusicSourceDiagnostics.shared.record(event: "chart-output-track", source: song.source.rawValue, provider: chartName, duration: 0, result: "success", detail: "rank=\(index + 1) title=\(song.title) artist=\(song.artist)")
+        }
+        return output
     }
     private func diagnosedChart(source: String, provider: String, chart: String, fetch: () async throws -> [MusicSong]) async -> [MusicSong] {
         let started = Date()

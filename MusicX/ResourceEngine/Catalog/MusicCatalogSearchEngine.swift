@@ -149,7 +149,7 @@ struct MusicCatalogSearchEngine {
 
     // Rankings refresh every two hours. A failed refresh keeps the last valid snapshot.
     func toplist(_ chartName: String, count: Int = 50, forceRefresh: Bool = false) async throws -> [MusicSong] {
-        let key = "catalog-chart-v3|\(chartName)|\(count)"
+        let key = "catalog-chart-v4|\(chartName)|\(count)"
         let cached: MusicCatalogStore.Snapshot<[MusicSong]>? =
             await MusicCatalogStore.shared.snapshot(for: key)
         let started = Date()
