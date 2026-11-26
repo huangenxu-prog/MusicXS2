@@ -445,7 +445,8 @@ struct PlatformCollectionCatalog {
         let payload = try JSONSerialization.data(withJSONObject: body)
         var components = URLComponents(string: "https://u.y.qq.com/cgi-bin/musicu.fcg")!
         components.queryItems = [URLQueryItem(name: "format", value: "json"),
-                                 URLQueryItem(name: "data", value: String(decoding: payload, as: UTF8.self))]
+                                 URLQueryItem(name: "data", value: String(decoding: payload, as: UTF8.self)),
+                                 URLQueryItem(name: "_", value: String(Int64(Date().timeIntervalSince1970 * 1000)))]
         guard let url = components.url else {
             throw MusicSourceError.invalidResponse("QQ 榜单地址无效")
         }
@@ -453,6 +454,7 @@ struct PlatformCollectionCatalog {
         request.timeoutInterval = 12
         request.setValue("https://y.qq.com/", forHTTPHeaderField: "Referer")
         request.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         let root = try await json(for: request)
         let envelope = root["detail"] as? [String: Any] ?? [:]
         guard (root["code"] as? Int ?? -1) == 0,

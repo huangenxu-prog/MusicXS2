@@ -472,6 +472,10 @@ struct MXReferenceDetail: View {
                 tracks = try await catalog.toplist(name, count: 50, forceRefresh: forceRefresh)
             case .newReleases:
                 tracks = try await catalog.toplist("新歌榜", count: 50, forceRefresh: forceRefresh)
+                MusicSourceDiagnostics.shared.record(event: "chart-display", source: "light", provider: "新歌榜", duration: 0, result: "loaded", detail: "qq=\(tracks.filter { $0.source == .qq }.count) netease=\(tracks.filter { $0.source == .netease }.count)")
+                for (index, song) in tracks.prefix(10).enumerated() {
+                    MusicSourceDiagnostics.shared.record(event: "chart-display-track", source: song.source.rawValue, provider: "新歌榜", duration: 0, result: "loaded", detail: "rank=\(index + 1) title=\(song.title) artist=\(song.artist)")
+                }
             case .featuredPlaylists, .playlists:
                 playlists = try await catalog.featuredPlaylists(count: 30, forceRefresh: forceRefresh)
             case .playlistByID(let playlist):

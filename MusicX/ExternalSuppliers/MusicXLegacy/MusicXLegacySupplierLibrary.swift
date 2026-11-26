@@ -141,7 +141,14 @@ struct MusicXLegacySupplierLibrary: MusicResourceProvider, MusicCatalogSearchPro
             let detail = failures.isEmpty ? "" : "（" + failures.joined(separator: "；") + "）"
             throw MusicSourceError.invalidResponse("每日推荐暂时无法加载" + detail)
         }
-        return Array(merged.prefix(limit))
+        let output = Array(merged.prefix(limit))
+        let qqCount = output.filter { $0.source == .qq }.count
+        let wyCount = output.filter { $0.source == .netease }.count
+        MusicSourceDiagnostics.shared.record(event: "chart-output", source: "merged", provider: chartName, duration: 0, result: "success", detail: "qq=\(qqCount) netease=\(wyCount)")
+        for (index, song) in output.prefix(10).enumerated() {
+            MusicSourceDiagnostics.shared.record(event: "chart-output-track", source: song.source.rawValue, provider: chartName, duration: 0, result: "success", detail: "rank=\(index + 1) title=\(song.title) artist=\(song.artist)")
+        }
+        return output
     }
     private static func captureDailySource(
         operation: @escaping @Sendable () async throws -> [MusicSong]
@@ -294,6 +301,9 @@ struct MusicXLegacySupplierLibrary: MusicResourceProvider, MusicCatalogSearchPro
         do {
             let rows = try await fetch()
             MusicSourceDiagnostics.shared.record(event: "catalog-provider", source: source, provider: provider, duration: Date().timeIntervalSince(started), result: rows.isEmpty ? "empty" : "success", detail: "chart=\(chart) count=\(rows.count)")
+            for (index, song) in rows.prefix(10).enumerated() {
+                MusicSourceDiagnostics.shared.record(event: "chart-input-track", source: song.source.rawValue, provider: chart, duration: 0, result: "success", detail: "rank=\(index + 1) title=\(song.title) artist=\(song.artist)")
+            }
             return rows
         } catch {
             MusicSourceDiagnostics.shared.record(event: "catalog-provider", source: source, provider: provider, duration: Date().timeIntervalSince(started), result: "failed", detail: "chart=\(chart) code=\((error as NSError).code)")
